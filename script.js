@@ -132,12 +132,14 @@ function initSidebarToggle(){
 }
 
 /* ---------- seat map generator ----------
-   rows A-H, 10 seats each. Rows A-B = premium, C-E = gold, F-H = silver.
+   rows A-H, 10 seats each, split 5 | gap | 5 by a centre aisle.
+   Rows G-H = premium, C-E = gold, A-B = silver.
    Renders into a container, returns {getSelected(), totalPrice()} */
 function buildSeatMap(container, show, opts={}){
   const rows = ['A','B','C','D','E','F','G','H'];
   const seatsPerRow = 10;
-  const tierFor = r => ['A','B'].includes(r) ? 'premium' : ['C','D','E'].includes(r) ? 'gold' : 'silver';
+  const aisleAfter = 5;
+  const tierFor = r => ['G','H'].includes(r) ? 'premium' : ['C','D','E'].includes(r) ? 'gold' : 'silver';
   let selected = new Set();
   const maxSelect = opts.maxSelect || 8;
 
@@ -170,6 +172,12 @@ function buildSeatMap(container, show, opts={}){
         });
       }
       rowEl.appendChild(btn);
+      if(n === aisleAfter){
+        const aisle = document.createElement('div');
+        aisle.className = 'aisle';
+        aisle.setAttribute('aria-hidden','true');
+        rowEl.appendChild(aisle);
+      }
     }
     container.appendChild(rowEl);
   });
