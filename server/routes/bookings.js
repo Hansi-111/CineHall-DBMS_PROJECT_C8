@@ -15,6 +15,15 @@ const router = express.Router();
 /* Business Rule 6: cancellation only up to 2 hours before start. */
 const CANCEL_WINDOW_HOURS = 2;
 
+/* Rule 6, stated once. Every path that needs it interpolates this
+   rather than retyping it: the read paths derive `is_cancellable`
+   from it, and the cancel endpoint checks it to allow staff to
+   override. These used to be two hand-written copies under two
+   different aliases, which is exactly how they would have drifted. */
+const SHOW_FAR_ENOUGH = `
+  (st.show_date + st.show_time) > LOCALTIMESTAMP + INTERVAL '${CANCEL_WINDOW_HOURS} hours'
+`;
+
 const BOOKING_SELECT = `
   b.booking_id,
   b.ticket_code,
@@ -34,11 +43,12 @@ const BOOKING_SELECT = `
   st.show_date::text AS show_date,
   to_char(st.show_time, 'HH24:MI') AS show_time,
   to_char(st.show_time, 'AM')     AS meridiem,
-  /* Rule 6, decided in SQL so that this flag and the cancel endpoint
-     can never disagree. See the note in the POST handler. */
-  (b.status = 'confirmed'
-     AND (st.show_date + st.show_time) > LOCALTIMESTAMP + INTERVAL '${CANCEL_WINDOW_HOURS} hours'
-  ) AS within_cancel_window
+  /* Rule 6, decided in SQL so this flag and the cancel endpoint can
+     never disagree. Aliased to the name the API actually publishes,
+     which every endpoint returns: this used to be derived separately
+     by the list handler only, so a booking created by POST came back
+     without it and the page could not tell whether it was cancellable. */
+  (b.status = 'confirmed' AND ${SHOW_FAR_ENOUGH}) AS is_cancellable
 `;
 
 const SEATS_FOR_BOOKING = `
@@ -48,6 +58,19 @@ const SEATS_FOR_BOOKING = `
   JOIN seat bs_seat ON bs_seat.seat_id = link.seat_id
   WHERE link.booking_id = $1
 `;
+
+/* Every endpoint that returns a booking passes its row through here,
+   so all four publish the same fields. `is_cancellable` arrives from
+   the SQL above; this only attaches the seat labels. */
+async function withSeats(client, row) {
+  const seats = await client.query(SEATS_FOR_BOOKING, [row.booking_id]);
+  return {
+    ...row,
+    // Cancelled bookings have their booking_seat rows removed to
+    // release the seats, so this is empty for them.
+    seats: (seats.rows[0].seats || '').split(',').filter(Boolean)
+  };
+}
 
 async function loadBooking(client, bookingId) {
   const { rows } = await client.query(
@@ -62,8 +85,7 @@ async function loadBooking(client, bookingId) {
     [bookingId]
   );
   if (!rows[0]) return null;
-  const seats = await client.query(SEATS_FOR_BOOKING, [bookingId]);
-  return { ...rows[0], seats: (seats.rows[0].seats || '').split(',').filter(Boolean) };
+  return withSeats(client, rows[0]);
 }
 
 /* A collision on the random part of a ticket code is unlikely but
@@ -296,23 +318,11 @@ router.get('/', requireAuth, async (req, res) => {
     params
   );
 
-  const withSeats = await Promise.all(
-    rows.map(async (row) => {
-      const seats = await db.query(SEATS_FOR_BOOKING, [row.booking_id]);
-      return {
-        ...row,
-        // Cancelled bookings have their booking_seat rows removed to
-        // release the seats, so this is empty for them. Rebuild the
-        // label list from the cancellation record instead.
-        seats: (seats.rows[0].seats || '').split(',').filter(Boolean),
-        // Computed by Postgres so it agrees with the cancellation
-        // endpoint, which enforces the same 2-hour rule in SQL.
-        is_cancellable: row.status === 'confirmed' && row.within_cancel_window
-      };
-    })
+  const withSeatsList = await Promise.all(
+    rows.map((row) => withSeats(db, row))
   );
 
-  res.json({ bookings: withSeats });
+  res.json({ bookings: withSeatsList });
 });
 
 router.get('/:id', requireAuth, async (req, res) => {
@@ -341,10 +351,7 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
     const booking = await db.withTransaction(async (client) => {
       const { rows } = await client.query(
         `SELECT b.booking_id, b.customer_id, b.status,
-                st.show_date::text AS show_date,
-                to_char(st.show_time,'HH24:MI') AS show_time,
-                (st.show_date + st.show_time) > LOCALTIMESTAMP + INTERVAL '${CANCEL_WINDOW_HOURS} hours'
-                  AS within_window
+                ${SHOW_FAR_ENOUGH} AS within_window
          FROM booking b
          JOIN showtime st ON st.showtime_id = b.showtime_id
          WHERE b.booking_id = $1

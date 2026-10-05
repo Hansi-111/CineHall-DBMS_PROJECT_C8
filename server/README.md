@@ -79,7 +79,7 @@ Public reads, admin writes. `certificate` is the censor rating.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `GET` | `/api/movies` | — | `?status=now\|upcoming\|ended`, `?search=` |
+| `GET` | `/api/movies` | — | `?status=now\|upcoming` |
 | `GET` | `/api/movies/:id` | — | |
 | `POST` | `/api/movies` | admin | |
 | `PUT` | `/api/movies/:id` | admin | Partial — omitted fields are untouched |
@@ -128,8 +128,19 @@ they are literal rather than wildcards. It is staff-only on purpose: a
 customer's own bookings are already scoped by their token, so there is
 nothing for them to search.
 
-Creating a booking is a single transaction that:
+All four booking endpoints return the same object, including the
+`is_cancellable` boolean: confirmed, and still more than
+`CANCEL_WINDOW_HOURS` from the start. It is computed in SQL, in the same
+expression the cancel endpoint checks, so the flag and the endpoint
+cannot disagree. It used to be derived separately by the list handler
+only, so a booking created by `POST` came back without it and a page
+rendering straight from that response would have told the customer
+their fresh booking could not be cancelled.
 
+`is_cancellable` reflects what a *customer* may do. Staff can cancel
+inside the window, which is how mistakes get cleaned up.
+
+Creating a booking is a single transaction that:
 1. locks the requested seat rows with `SELECT ... FOR UPDATE`,
 2. re-checks each seat exists on that screen and is not already booked,
 3. prices each seat from the showtime's tier price,

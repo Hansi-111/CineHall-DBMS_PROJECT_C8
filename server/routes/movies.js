@@ -21,12 +21,31 @@ const MOVIE_COLUMNS = `
   certificate, status, synopsis, rating::float8 AS rating
 `;
 
+/* Mirrors the CHECK constraint on movie.status. Kept as a list rather
+   than a regex so the error message can name the valid values. */
+const MOVIE_STATUSES = ['now', 'upcoming'];
+
 /* list all movies, optionally filtered by status */
 router.get('/', async (req, res) => {
   const { status } = req.query;
+
+  /* Reject an unrecognised value instead of ignoring it. This used to
+     fall through to the unfiltered query, so ?status=released (or any
+     typo) returned every movie wearing a 200. A page asking for
+     "upcoming" and getting "now" as well would have no way to tell. */
+  if (status !== undefined && !MOVIE_STATUSES.includes(status)) {
+    return res.status(400).json({
+      error: 'Validation failed',
+      errors: [{
+        field: 'status',
+        message: `Status must be one of: ${MOVIE_STATUSES.join(', ')}`
+      }]
+    });
+  }
+
   const params = [];
   let where = '';
-  if (status === 'now' || status === 'upcoming') {
+  if (status) {
     params.push(status);
     where = 'WHERE status = $1';
   }

@@ -173,6 +173,15 @@ async function main() {
     const { status } = await api('GET', '/api/movies/not-a-number');
     check('non-numeric id is 404, not 500', status === 404, `got ${status}`);
   }
+  {
+    /* An unrecognised status used to be ignored, so the route returned
+       every movie wearing a 200. A page asking for one status would
+       have had no way to notice it was also getting the others. */
+    const { status, data } = await api('GET', '/api/movies?status=released');
+    check('unknown status filter is 400, not a silent full list', status === 400, `got ${status}`);
+    check('the error names the valid statuses', /now, upcoming/.test(JSON.stringify(data)), JSON.stringify(data));
+    check('the refused filter returns no movies at all', data.movies === undefined, 'movies leaked into the error');
+  }
 
   // ---------------------------------------------------------------
   section('Movies (admin writes + role enforcement)');
@@ -378,6 +387,9 @@ async function main() {
   const premiumSeats = mapData.seats.filter((s) => s.tier === 'premium' && !s.is_booked).slice(0, 2);
   const silverSeat = mapData.seats.find((s) => s.tier === 'silver' && !s.is_booked);
   let bookingId, bookingTotal;
+  /* The booking created purely to pin the response shape across all
+     four booking endpoints. */
+  let shapeBookingId;
 
   {
     const { status, data } = await api('POST', '/api/bookings', {
@@ -548,6 +560,53 @@ async function main() {
       token: customerToken, body: { showtime_id: showtimeId, seat_ids: [premiumSeats[0].seat_id] }
     });
     check('a released seat can be booked again (201)', status === 201, `got ${status}`);
+  }
+
+  // ---------------------------------------------------------------
+  section('is_cancellable is published by every booking endpoint');
+  /* This field was derived separately by the list handler only, so a
+     booking created by POST came back without it. The front end reads
+     one shape from all four paths, and a missing field there means
+     `is_cancellable === true` is false -- so a page that renders
+     straight from the POST response would tell a customer their fresh
+     booking could not be cancelled. Hence one shape, checked from
+     every direction. */
+  {
+    const { status, data } = await api('POST', '/api/bookings', {
+      token: customerToken,
+      body: { showtime_id: showtimeId, seat_ids: [premiumSeats[1].seat_id], payment_method: 'upi' }
+    });
+    check('booking for the shape check succeeds', status === 201, `${status} ${JSON.stringify(data)}`);
+    shapeBookingId = data.booking?.booking_id;
+    check('POST /bookings publishes is_cancellable', typeof data.booking?.is_cancellable === 'boolean',
+      `got ${typeof data.booking?.is_cancellable}`);
+    check('a booking seven days out is cancellable', data.booking?.is_cancellable === true,
+      `got ${data.booking?.is_cancellable}`);
+  }
+  {
+    const { data } = await api('GET', `/api/bookings/${shapeBookingId}`, { token: customerToken });
+    check('GET /bookings/:id publishes it too', data.booking?.is_cancellable === true,
+      `got ${data.booking?.is_cancellable}`);
+    check('and agrees with the POST response', data.booking?.is_cancellable === true,
+      'the two paths disagree');
+  }
+  {
+    const { data } = await api('GET', '/api/bookings', { token: customerToken });
+    const mine = data.bookings?.find((b) => b.booking_id === shapeBookingId);
+    check('GET /bookings lists it with the same value', mine?.is_cancellable === true,
+      `got ${mine?.is_cancellable}`);
+  }
+  {
+    /* And the flag has to track the actual rule, not just be present.
+       The 2-hour boundary needs the database's own clock, and this
+       suite talks only HTTP, so that half lives in
+       view-model-check.js ("the 2-hour window is real") where it can
+       read LOCALTIMESTAMP. Deriving "soon" from this process's clock
+       instead would reintroduce the offset bug. */
+    const { data } = await api('POST', `/api/bookings/${shapeBookingId}/cancel`,
+      { token: customerToken, body: { reason: 'shape check' } });
+    check('after cancelling, is_cancellable is false', data.booking?.is_cancellable === false,
+      `got ${data.booking?.is_cancellable}`);
   }
 
   // ---------------------------------------------------------------
