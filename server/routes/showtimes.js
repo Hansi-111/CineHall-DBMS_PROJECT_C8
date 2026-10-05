@@ -30,7 +30,12 @@ const SHOWTIME_SELECT = `
   to_char(st.show_time, 'AM')     AS meridiem,
   st.silver_price::float8  AS silver_price,
   st.gold_price::float8    AS gold_price,
-  st.premium_price::float8 AS premium_price
+  st.premium_price::float8 AS premium_price,
+  (SELECT count(*)::int
+     FROM booking_seat bs
+     JOIN booking b ON b.booking_id = bs.booking_id
+    WHERE bs.showtime_id = st.showtime_id
+      AND b.status = 'confirmed') AS seats_booked
 `;
 
 /* HH:MI + meridiem -> HH:MM:SS for the TIME column. */
@@ -71,12 +76,23 @@ function validateShowtime(body) {
   return { errors, time };
 }
 
+/* Past shows are hidden by default. The seed is built from
+   CURRENT_DATE + offset (seed.sql), so a showtime stays in the table
+   after it has played; without this the front end would offer seats
+   for a film that finished hours ago. `?include_past=1` turns it off
+   for the admin console, which does want the full schedule.
+
+   show_date + show_time is a wall-clock timestamp, so it is compared
+   against LOCALTIMESTAMP rather than now(), which is timestamptz. */
+const NOT_PAST = '(st.show_date + st.show_time) > LOCALTIMESTAMP';
+
 router.get('/', async (req, res) => {
   const filters = [];
   const params = [];
   if (req.query.movie_id) { params.push(req.query.movie_id); filters.push(`st.movie_id = $${params.length}`); }
   if (req.query.screen_id) { params.push(req.query.screen_id); filters.push(`st.screen_id = $${params.length}`); }
   if (req.query.date)      { params.push(req.query.date);      filters.push(`st.show_date = $${params.length}`); }
+  if (req.query.include_past !== '1') filters.push(NOT_PAST);
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
   const { rows } = await db.query(
@@ -92,8 +108,10 @@ router.get('/', async (req, res) => {
   res.json({ showtimes: rows });
 });
 
-/* Showtimes for one movie, grouped by day. This is what the old
-   movie-details.html built from DB.showsForMovie(). */
+/* Showtimes for one movie. This is what the old movie-details.html
+   built from DB.showsForMovie(). Future shows only, for the same
+   reason as the list above: a date chip must not lead to a seat map
+   full of seats for a film that already played. */
 router.get('/movie/:id', async (req, res) => {
   if (!requireInt(req, res)) return;
   const { rows } = await db.query(
@@ -101,7 +119,7 @@ router.get('/movie/:id', async (req, res) => {
      FROM showtime st
      JOIN screen sc  ON sc.screen_id  = st.screen_id
      JOIN theatre t  ON t.theatre_id  = sc.theatre_id
-     WHERE st.movie_id = $1
+     WHERE st.movie_id = $1 AND ${NOT_PAST}
      ORDER BY st.show_date, st.show_time`,
     [req.params.id]
   );

@@ -245,6 +245,9 @@ async function main() {
   // ---------------------------------------------------------------
   section('Showtimes + seat map');
   let showtimeId, screenId, theatreName;
+  /* Set by the past-showtime block below and reused by the "Past shows"
+     section, so the fixture is created once. */
+  let showtimePastId;
   {
     const { status, data } = await api('GET', '/api/showtimes');
     check('list showtimes returns 200', status === 200, `got ${status}`);
@@ -256,6 +259,41 @@ async function main() {
   {
     const { status, data } = await api('GET', `/api/showtimes?movie_id=${movieId}`);
     check('showtimes filtered by movie', status === 200 && data.showtimes.length > 0, `got ${status}`);
+  }
+  {
+    /* The seed is built from CURRENT_DATE + offset, so yesterday's
+       shows linger in the table. They must not be offered, or the seat
+       page links to a film that finished hours ago.
+
+       These assert against a showtime this run deliberately put in the
+       past, rather than re-deriving "past" from the client's clock.
+       show_date and show_time carry no timezone and the server and the
+       database do not share one, so anything computed here would only
+       test this machine's offset. A yesterday showtime is past under
+       every clock. */
+    const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+    const pastTime = `00:${String(5 + (hash(suffix + 'p') % 50)).padStart(2, '0')}`;
+    const { data: made } = await api('POST', '/api/showtimes', {
+      token: adminToken,
+      body: { movie_id: movieId, screen_id: screenId, show_date: yesterday, show_time: pastTime, silver_price: 1, gold_price: 1, premium_price: 1 }
+    });
+    const pastId = made.showtime?.showtime_id;
+    check('scheduled a showtime in the past to test against', Boolean(pastId), JSON.stringify(made));
+    showtimePastId = pastId;
+    const { data: def } = await api('GET', '/api/showtimes');
+    check('every showtime reports seats_booked',
+      def.showtimes.every((s) => Number.isInteger(s.seats_booked)),
+      JSON.stringify(def.showtimes[0]?.seats_booked));
+    if (pastId) {
+      check('a past showtime is hidden from the default list',
+        !def.showtimes.some((s) => s.showtime_id === pastId));
+      const { data: all } = await api('GET', '/api/showtimes?include_past=1');
+      check('include_past=1 brings it back',
+        all.showtimes.some((s) => s.showtime_id === pastId));
+      const { data: perMovie } = await api('GET', `/api/showtimes/movie/${movieId}`);
+      check('a past showtime is hidden from its movie too',
+        !perMovie.showtimes.some((s) => s.showtime_id === pastId));
+    }
   }
   {
     const { status, data } = await api('GET', `/api/showtimes/${showtimeId}/seatmap`);
@@ -418,6 +456,63 @@ async function main() {
   {
     const { status } = await api('GET', '/api/bookings', { token: adminToken, });
     check('anonymous listing is 401', (await api('GET', '/api/bookings')).status === 401);
+  }
+
+  // ---------------------------------------------------------------
+  section('Past shows');
+  /* Booking a show that has already started. The list endpoints hide
+     these, so this only fires on a stale client or a race, which is
+     exactly why it needs its own check rather than relying on the
+     list filter. */
+  let pastShowId;
+  {
+    /* Reuses the past showtime the Showtimes section created, so it is
+       not scheduled twice. */
+    pastShowId = showtimePastId;
+  }
+  if (pastShowId) {
+    const { data: map } = await api('GET', `/api/showtimes/${pastShowId}/seatmap`);
+    const seat = map.seats?.find((s) => !s.is_booked);
+    const { status, data } = await api('POST', '/api/bookings', {
+      token: customerToken,
+      body: { showtime_id: pastShowId, seat_ids: [seat.seat_id], payment_method: 'upi' }
+    });
+    check('booking a show that already started is 409', status === 409, `got ${status} ${JSON.stringify(data)}`);
+    check('the refusal explains itself', /already started/i.test(data?.error || ''), data?.error);
+
+    /* Nothing may be written, or the guard would leak a booking and a
+       held seat every time it rejected one. */
+    const { data: after } = await api('GET', `/api/showtimes/${pastShowId}/seatmap`);
+    check('the rejected booking left no seat held',
+      after.seats.find((s) => s.seat_id === seat.seat_id)?.is_booked === false);
+    check('seats_booked stays 0 after the refusal',
+      (await api('GET', `/api/showtimes/${pastShowId}`)).data.showtime?.seats_booked === 0);
+  }
+
+  // ---------------------------------------------------------------
+  section('Booking search');
+  {
+    const { status, data } = await api('GET', `/api/bookings?q=${encodeURIComponent(customer.name)}`, { token: adminToken });
+    check('staff can search bookings by customer name', status === 200 && data.bookings.length > 0, `${status}`);
+    check('search only returns matches',
+      data.bookings.every((b) => b.customer_name === customer.name), 'non-matching row leaked');
+  }
+  {
+    const { data } = await api('GET', `/api/bookings?q=${encodeURIComponent(bookingTotal ? 'CH-' : 'CH-')}`, { token: adminToken });
+    check('staff can search bookings by ticket code', data.bookings.every((b) => /^CH-/.test(b.ticket_code)));
+  }
+  {
+    /* % and _ are LIKE metacharacters. Unescaped, a search for "%"
+       would match every booking instead of none. */
+    const { data } = await api('GET', '/api/bookings?q=%25', { token: adminToken });
+    check('a bare % in the search matches nothing', data.bookings.length === 0, `matched ${data.bookings.length}`);
+  }
+  {
+    /* Customers are scoped to their own rows by token, so q must not
+       become a way to probe other people's bookings. */
+    const { data } = await api('GET', '/api/bookings?q=%25', { token: customerToken });
+    check('q= cannot widen a customer beyond their own bookings',
+      data.bookings.every((b) => b.customer_email === customer.email), 'foreign row leaked');
   }
 
   // ---------------------------------------------------------------

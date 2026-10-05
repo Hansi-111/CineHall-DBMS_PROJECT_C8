@@ -91,14 +91,24 @@ A non-numeric `:id` returns `404`, never `500`.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `GET` | `/api/showtimes` | — | `?movie_id=`, `?screen_id=`, `?date=`, `?theatre_id=` |
+| `GET` | `/api/showtimes` | — | `?movie_id=`, `?screen_id=`, `?date=`, `?include_past=1` |
 | `GET` | `/api/showtimes/movie/:id` | — | Scheduled showtimes for one movie |
 | `GET` | `/api/showtimes/:id` | — | |
 | `GET` | `/api/showtimes/:id/seatmap` | — | Every seat for the screen with its live booked/free state |
 | `POST` | `/api/showtimes` | admin | `409` on duplicate screen + date + time |
 | `DELETE` | `/api/showtimes/:id` | admin | `409` if any booking references it |
 
-Each showtime carries its own `silver_price`, `gold_price`, `premium_price`.
+Each showtime carries its own `silver_price`, `gold_price`, `premium_price`,
+and `seats_booked`, the number of seats held by confirmed bookings on it.
+
+**Past shows are hidden by default.** The seed is built from
+`CURRENT_DATE + offset`, so a showtime stays in the table after it has
+played. Both list endpoints exclude anything whose
+`show_date + show_time` has passed, so the seat picker never offers a
+film that already started. `GET /api/showtimes?include_past=1` opts out,
+which is what the admin console uses to show the full schedule;
+`GET /api/showtimes/movie/:id` has no opt-out, since nothing in the
+customer flow should link to a past show.
 
 The seat map returns one entry per physical seat with `is_booked`. It is
 computed by the `seat_map` view, so it cannot drift from `booking_seat`.
@@ -112,6 +122,12 @@ computed by the `seat_map` view, so it cannot drift from `booking_seat`.
 | `GET` | `/api/bookings/:id` | owner or staff | `404` for anyone else |
 | `POST` | `/api/bookings/:id/cancel` | owner or staff | |
 
+Staff listing accepts `?email=`, `?status=` and `?q=`. The free-text `q`
+matches customer name, email or ticket code, with `%` and `_` escaped so
+they are literal rather than wildcards. It is staff-only on purpose: a
+customer's own bookings are already scoped by their token, so there is
+nothing for them to search.
+
 Creating a booking is a single transaction that:
 
 1. locks the requested seat rows with `SELECT ... FOR UPDATE`,
@@ -124,7 +140,9 @@ Bookings are only ever created **after** payment succeeds; there is no
 10-minute seat-hold state, so an abandoned checkout never strands a seat.
 An empty `seat_ids`, or a seat that is not on that screen, returns `400`.
 A seat taken between the list rendering and the submit returns `409` and
-nothing is written.
+nothing is written. A show whose start time has already passed returns
+`409` — the list endpoints hide those, so this only catches a race or a
+stale client.
 
 **Cancellation is limited to 2 hours before the show starts** (Rule 6), so
 a same-day show that has already begun cannot be cancelled — `409`. A

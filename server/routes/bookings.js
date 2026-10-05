@@ -33,7 +33,12 @@ const BOOKING_SELECT = `
   sc.screen_number,
   st.show_date::text AS show_date,
   to_char(st.show_time, 'HH24:MI') AS show_time,
-  to_char(st.show_time, 'AM')     AS meridiem
+  to_char(st.show_time, 'AM')     AS meridiem,
+  /* Rule 6, decided in SQL so that this flag and the cancel endpoint
+     can never disagree. See the note in the POST handler. */
+  (b.status = 'confirmed'
+     AND (st.show_date + st.show_time) > LOCALTIMESTAMP + INTERVAL '${CANCEL_WINDOW_HOURS} hours'
+  ) AS within_cancel_window
 `;
 
 const SEATS_FOR_BOOKING = `
@@ -119,7 +124,9 @@ router.post('/', requireAuth, async (req, res) => {
                 st.gold_price::float8    AS gold_price,
                 st.premium_price::float8 AS premium_price,
                 st.show_date::text AS show_date,
-                to_char(st.show_time,'HH24:MI') AS show_time
+                to_char(st.show_time,'HH24:MI') AS show_time,
+                to_char(st.show_date + st.show_time, 'YYYY-MM-DD"T"HH24:MI') AS starts_at,
+                (st.show_date + st.show_time) > LOCALTIMESTAMP AS not_started
          FROM showtime st WHERE st.showtime_id = $1`,
         [showtimeId]
       );
@@ -127,6 +134,25 @@ router.post('/', requireAuth, async (req, res) => {
       if (!show) {
         const err = new Error('Showtime not found');
         err.status = 404;
+        throw err;
+      }
+
+      /* Once the film has started there is nothing left to book. This
+         has to be checked here rather than in the front end, because
+         the seed is written with CURRENT_DATE + offset (seed.sql), so
+         yesterday's shows stay in the table forever. Without this a
+         customer can buy a seat for a film that ended hours ago.
+
+         The comparison is made by Postgres, not in JavaScript. Every
+         other "is this in the past" test in this file is SQL too, and
+         they have to agree: show_date and show_time are wall-clock
+         values with no timezone, so whichever layer interprets them
+         defines the answer. Doing it in JS used to disagree with the
+         list endpoint by the offset between the server's timezone and
+         the database's, which offered shows that then refused to book. */
+      if (!show.not_started) {
+        const err = new Error('This show has already started and can no longer be booked');
+        err.status = 409;
         throw err;
       }
 
@@ -233,6 +259,24 @@ router.get('/', requireAuth, async (req, res) => {
       params.push(req.query.status);
       filters.push(`b.status = $${params.length}`);
     }
+    /* Free-text search across the three things the admin bookings table
+       shows: who booked, how to reach them, and the ticket code. Staff
+       only, because a customer must never be able to search other
+       people's bookings -- their own are already filtered below. */
+    if (req.query.q) {
+      const needle = String(req.query.q).trim().toLowerCase();
+      if (needle) {
+        /* Escape the LIKE metacharacters so a search for "50%" or a
+           name containing "_" matches literally instead of turning into
+           a wildcard. */
+        params.push(`%${needle.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+        filters.push(
+          `(c.name ILIKE $${params.length} ESCAPE '\\'
+            OR c.email ILIKE $${params.length} ESCAPE '\\'
+            OR b.ticket_code ILIKE $${params.length} ESCAPE '\\')`
+        );
+      }
+    }
   } else {
     params.push(req.user.sub);
     filters.push(`b.customer_id = $${params.length}`);
@@ -261,9 +305,9 @@ router.get('/', requireAuth, async (req, res) => {
         // release the seats, so this is empty for them. Rebuild the
         // label list from the cancellation record instead.
         seats: (seats.rows[0].seats || '').split(',').filter(Boolean),
-        is_cancellable: row.status === 'confirmed' &&
-          new Date(`${row.show_date}T${row.show_time}:00`) >
-          new Date(Date.now() + CANCEL_WINDOW_HOURS * 3600 * 1000)
+        // Computed by Postgres so it agrees with the cancellation
+        // endpoint, which enforces the same 2-hour rule in SQL.
+        is_cancellable: row.status === 'confirmed' && row.within_cancel_window
       };
     })
   );
@@ -298,7 +342,9 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
       const { rows } = await client.query(
         `SELECT b.booking_id, b.customer_id, b.status,
                 st.show_date::text AS show_date,
-                to_char(st.show_time,'HH24:MI') AS show_time
+                to_char(st.show_time,'HH24:MI') AS show_time,
+                (st.show_date + st.show_time) > LOCALTIMESTAMP + INTERVAL '${CANCEL_WINDOW_HOURS} hours'
+                  AS within_window
          FROM booking b
          JOIN showtime st ON st.showtime_id = b.showtime_id
          WHERE b.booking_id = $1
@@ -324,14 +370,10 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
 
       // Rule 6 is a customer-facing rule; staff can cancel anything
       // so they can clean up mistakes.
-      if (!isStaff) {
-        const startsAt = new Date(`${current.show_date}T${current.show_time}:00`);
-        const deadline = new Date(Date.now() + CANCEL_WINDOW_HOURS * 3600 * 1000);
-        if (startsAt <= deadline) {
-          const err = new Error(`Bookings can only be cancelled up to ${CANCEL_WINDOW_HOURS} hours before showtime`);
-          err.status = 409;
-          throw err;
-        }
+      if (!isStaff && !current.within_window) {
+        const err = new Error(`Bookings can only be cancelled up to ${CANCEL_WINDOW_HOURS} hours before showtime`);
+        err.status = 409;
+        throw err;
       }
 
       await client.query(
