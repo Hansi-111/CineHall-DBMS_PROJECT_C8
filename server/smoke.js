@@ -74,8 +74,13 @@ async function main() {
      starting point instead of a hard-coded 16. A hard-coded count makes
      the suite fail on a second run, because the booking showtime it
      creates has bookings against it and therefore cannot be deleted
-     again afterwards. */
-  const showsAtStart = (await api('GET', '/api/showtimes')).data.showtimes?.length ?? 0;
+     again afterwards.
+
+     Counted with include_past=1: the public list hides shows that have
+     already started, and the seed's "today" shows do exactly that as
+     the day goes on, which would otherwise read as a missing seed. */
+  const showsAtStart =
+    (await api('GET', '/api/showtimes?include_past=1')).data.showtimes?.length ?? 0;
 
   const customer = {
     name: 'Smoke Tester', email: `smoke.${suffix}@example.com`,
@@ -280,11 +285,21 @@ async function main() {
        database do not share one, so anything computed here would only
        test this machine's offset. A yesterday showtime is past under
        every clock. */
-    const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
-    const pastTime = `00:${String(5 + (hash(suffix + 'p') % 50)).padStart(2, '0')}`;
+    /* Find a past date that is free on this screen. The suite books a
+       seat on its past showtime, and that booking (even once cancelled)
+       keeps the showtime undeletable via the API, so a fixed slot would
+       collide on a later run. Walk back from yesterday to an empty
+       00:00 slot instead. */
+    const { data: sched } = await api('GET', `/api/showtimes?screen_id=${screenId}&include_past=1`);
+    const taken = new Set((sched.showtimes || []).map(s => `${s.show_date} ${s.show_time}`));
+    let pastDate, pastTime = '00:00';
+    for (let ago = 1; ago <= 400 && !pastDate; ago++) {
+      const d = new Date(Date.now() - ago * 86400_000).toISOString().slice(0, 10);
+      if (!taken.has(`${d} ${pastTime}`)) pastDate = d;
+    }
     const { data: made } = await api('POST', '/api/showtimes', {
       token: adminToken,
-      body: { movie_id: movieId, screen_id: screenId, show_date: yesterday, show_time: pastTime, silver_price: 1, gold_price: 1, premium_price: 1 }
+      body: { movie_id: movieId, screen_id: screenId, show_date: pastDate, show_time: pastTime, silver_price: 1, gold_price: 1, premium_price: 1 }
     });
     const pastId = made.showtime?.showtime_id;
     check('scheduled a showtime in the past to test against', Boolean(pastId), JSON.stringify(made));

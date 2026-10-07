@@ -6,6 +6,7 @@
 <title>Booking Confirmed — CineHall</title>
 <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
 <nav class="topnav">
@@ -17,50 +18,65 @@
 
 <div class="container" style="padding:44px 28px 60px;" id="page"></div>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-const booking = JSON.parse(sessionStorage.getItem('ch_last_booking')||'null');
-const page = qs('#page');
+(async () => {
+  const page = qs('#page');
+  const id = getParam('id');
 
-if(!booking){
-  page.innerHTML = `<div class="empty-state"><div class="h-display">No recent booking</div><a href="index.html" style="color:var(--gold)">Browse movies</a></div>`;
-} else {
-  const show = DB.getShow(booking.showId);
-  const movie = DB.getMovie(booking.movieId);
+  if(!id){
+    page.innerHTML = `<div class="empty-state"><div class="h-display">No booking to show</div><a href="index.html" style="color:var(--gold)">Browse movies</a></div>`;
+    return;
+  }
 
-  page.innerHTML = `
-    <div style="text-align:center; margin-bottom:26px;">
-      <p class="eyebrow" style="justify-content:center;">Booking confirmed</p>
-      <h1 class="h-display" style="font-size:2rem; margin-top:6px;">Enjoy the show</h1>
-    </div>
+  renderLoading(page, 'Fetching your ticket…');
 
-    <div class="ticket">
-      <div class="ticket-top">
-        <p class="muted" style="font-size:.78rem;">${show.cinema}</p>
-        <h2 class="h-display" style="font-size:1.7rem; margin:2px 0 10px;">${movie.title}</h2>
-        <div style="display:flex; justify-content:space-between; font-size:.86rem;">
-          <div><p class="muted" style="font-size:.72rem;">DATE</p><p>${fmtDate(show.date)}</p></div>
-          <div><p class="muted" style="font-size:.72rem;">TIME</p><p>${show.time}</p></div>
-          <div><p class="muted" style="font-size:.72rem;">SEATS</p><p class="mono" style="color:var(--gold);">${booking.seats.join(', ')}</p></div>
+  try {
+    /* Everything on this page comes from the server: the booking row,
+       its showtime and its movie. Nothing is kept in sessionStorage. */
+    const booking = await api.booking(id);
+    const [show, movie] = await Promise.all([
+      api.showtime(booking.showId),
+      api.movie(booking.movieId)
+    ]);
+
+    page.innerHTML = `
+      <div style="text-align:center; margin-bottom:26px;">
+        <p class="eyebrow" style="justify-content:center;">Booking confirmed</p>
+        <h1 class="h-display" style="font-size:2rem; margin-top:6px;">Enjoy the show</h1>
+      </div>
+
+      <div class="ticket">
+        <div class="ticket-top">
+          <p class="muted" style="font-size:.78rem;">${escapeHtml(show.cinema)}</p>
+          <h2 class="h-display" style="font-size:1.7rem; margin:2px 0 10px;">${escapeHtml(movie.title)}</h2>
+          <div style="display:flex; justify-content:space-between; font-size:.86rem;">
+            <div><p class="muted" style="font-size:.72rem;">DATE</p><p>${fmtDate(show.date)}</p></div>
+            <div><p class="muted" style="font-size:.72rem;">TIME</p><p>${show.time}</p></div>
+            <div><p class="muted" style="font-size:.72rem;">SEATS</p><p class="mono">${escapeHtml((booking.seats || []).join(', '))}</p></div>
+          </div>
+        </div>
+        <div class="ticket-divider"></div>
+        <div class="ticket-bottom">
+          <div>
+            <p class="muted" style="font-size:.72rem;">TICKET CODE</p>
+            <p class="ticket-code">${escapeHtml(booking.code)}</p>
+            <p class="muted" style="font-size:.76rem; margin-top:6px;">${escapeHtml(booking.name)} · ₹${booking.total}</p>
+          </div>
+          <div class="qr-box" title="Scan at entry"></div>
         </div>
       </div>
-      <div class="ticket-divider"></div>
-      <div class="ticket-bottom">
-        <div>
-          <p class="muted" style="font-size:.72rem;">TICKET CODE</p>
-          <p class="ticket-code">${booking.code}</p>
-          <p class="muted" style="font-size:.76rem; margin-top:6px;">${booking.name} · ₹${booking.total}</p>
-        </div>
-        <div class="qr-box" title="Scan at entry"></div>
-      </div>
-    </div>
 
-    <div style="display:flex; gap:12px; justify-content:center; margin-top:26px; flex-wrap:wrap;">
-      <a href="my-bookings.html" class="btn btn-outline">View My Bookings</a>
-      <a href="index.html" class="btn btn-gold">Book Another Movie</a>
-    </div>
-  `;
-}
+      <div style="text-align:center; margin-top:26px; display:flex; gap:12px; justify-content:center;">
+        <a href="my-bookings.html" class="btn btn-outline">My Bookings</a>
+        <a href="index.html" class="btn btn-gold">Book another show</a>
+      </div>
+    `;
+  } catch(err) {
+    renderError(page, err);
+  }
+})();
 </script>
 </body>
 </html>

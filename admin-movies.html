@@ -7,45 +7,65 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script src="admin-shell.js"></script>
 <script>
-const ui = renderAdminShell('movies');
-if(ui){
+(async () => {
+  const ui = renderAdminShell('movies');
+  if(!ui) return;
   ui.setTitle('Movies');
   ui.topbarRight.innerHTML = `<button class="btn btn-gold btn-sm" id="addMovieBtn">+ Add Movie</button>`;
 
-  function renderTable(){
-    const movies = DB.getMovies();
-    ui.content.innerHTML = `
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Title</th><th>Genre</th><th>Language</th><th>Duration</th><th>Rating</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            ${movies.map(m=>`
-              <tr>
-                <td style="font-weight:700;">${m.title}</td>
-                <td>${m.genre}</td>
-                <td>${m.lang}</td>
-                <td>${m.duration}m</td>
-                <td>${m.rating} · ★${m.score}</td>
-                <td><span class="status-badge ${m.status==='now'?'status-confirmed':'status-upcoming'}">${m.status==='now'?'Now Showing':'Upcoming'}</span></td>
-                <td style="display:flex; gap:6px;">
-                  <button class="icon-btn" data-edit="${m.id}" title="Edit">✎</button>
-                  <button class="icon-btn" data-del="${m.id}" title="Delete">✕</button>
-                </td>
-              </tr>`).join('') || `<tr><td colspan="7" class="muted" style="text-align:center; padding:30px;">No movies yet — add one to get started.</td></tr>`}
+  let movies = [];
+
+  async function renderTable(){
+    renderLoading(ui.content, 'Loading movies…');
+    try {
+      /* No status filter: the console manages the whole catalogue. */
+      movies = await api.movies();
+      ui.content.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Title</th><th>Genre</th><th>Language</th><th>Duration</th><th>Certificate</th><th>Rating</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              ${movies.map(m=>`
+                <tr>
+                  <td style="font-weight:700;">${escapeHtml(m.title)}</td>
+                  <td>${escapeHtml(m.genre)}</td>
+                  <td>${escapeHtml(m.lang)}</td>
+                  <td>${m.duration}m</td>
+                  <td>${escapeHtml(m.rating)}</td>
+                  <td>${m.score ?? '—'}</td>
+                  <td><span class="status-badge ${m.status==='now'?'status-confirmed':'status-upcoming'}">${m.status==='now'?'Now Showing':'Upcoming'}</span></td>
+                  <td style="display:flex; gap:6px;">
+                    <button class="icon-btn" data-edit="${m.id}" title="Edit">✎</button>
+                    <button class="icon-btn" data-del="${m.id}" title="Delete">✕</button>
+                  </td>
+                </tr>`).join('') || `<tr><td colspan="7" class="muted" style="text-align:center; padding:30px;">No movies yet — add one to get started.</td></tr>`}
           </tbody>
         </table>
       </div>
     `;
-    qsa('[data-edit]').forEach(b=>b.addEventListener('click', ()=>openModal(DB.getMovie(b.dataset.edit))));
-    qsa('[data-del]').forEach(b=>b.addEventListener('click', ()=>{
-      if(!confirm('Delete this movie? This cannot be undone.')) return;
-      DB.saveMovies(DB.getMovies().filter(m=>m.id!==b.dataset.del));
-      toast('Movie deleted');
-      renderTable();
-    }));
+
+      qsa('[data-edit]').forEach(b=>b.addEventListener('click', ()=>{
+        openModal(movies.find(m=>String(m.id)===b.dataset.edit));
+      }));
+      qsa('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
+        if(!confirm('Delete this movie? This cannot be undone.')) return;
+        try {
+          await api.deleteMovie(b.dataset.del);
+          toast('Movie deleted');
+          renderTable();
+        } catch(err) {
+          /* 409 means showtime bookings reference it; the server's
+             message names the count. */
+          toast(isApiError(err) ? err.message : 'Delete failed');
+        }
+      }));
+    } catch(err) {
+      renderError(ui.content, err);
+    }
   }
 
   // modal
@@ -55,67 +75,71 @@ if(ui){
     <div class="modal">
       <div class="modal-head"><h3 id="modalTitle">Add Movie</h3><button class="icon-btn" id="closeModal">✕</button></div>
       <form id="movieForm">
-        <input type="hidden" id="f-id">
         <div class="field"><label for="f-title">Title</label><input id="f-title" required></div>
         <div class="field"><label for="f-genre">Genre</label><input id="f-genre" required></div>
         <div class="field"><label for="f-lang">Language</label><input id="f-lang" required></div>
-        <div class="field"><label for="f-duration">Duration (minutes)</label><input id="f-duration" type="number" required></div>
-        <div class="field"><label for="f-rating">Certificate</label>
-          <select id="f-rating"><option>U</option><option>UA</option><option>A</option></select>
+        <div class="field"><label for="f-duration">Duration (minutes)</label><input id="f-duration" type="number" min="1" required></div>
+        <div class="field"><label for="f-certificate">Certificate</label>
+          <select id="f-certificate"><option>U</option><option>UA</option><option>A</option></select>
         </div>
+        <div class="field"><label for="f-score">User rating (0–10)</label><input id="f-score" type="number" min="0" max="10" step="0.1" placeholder="e.g. 8.4"></div>
         <div class="field"><label for="f-status">Status</label>
           <select id="f-status"><option value="now">Now Showing</option><option value="upcoming">Upcoming</option></select>
         </div>
-        <div class="field"><label for="f-synopsis">Synopsis</label><textarea id="f-synopsis" required></textarea></div>
+        <div class="field"><label for="f-synopsis">Synopsis</label><textarea id="f-synopsis"></textarea></div>
         <button class="btn btn-gold btn-block" type="submit">Save Movie</button>
       </form>
     </div>`;
   document.body.appendChild(backdrop);
 
+  let editingId = null;
+
   function openModal(movie){
+    editingId = movie ? movie.id : null;
     qs('#modalTitle').textContent = movie ? 'Edit Movie' : 'Add Movie';
-    qs('#f-id').value = movie ? movie.id : '';
     qs('#f-title').value = movie ? movie.title : '';
     qs('#f-genre').value = movie ? movie.genre : '';
     qs('#f-lang').value = movie ? movie.lang : '';
     qs('#f-duration').value = movie ? movie.duration : '';
-    qs('#f-rating').value = movie ? movie.rating : 'UA';
+    qs('#f-certificate').value = movie ? movie.rating : 'UA';
+    qs('#f-score').value = movie && movie.score != null ? movie.score : '';
     qs('#f-status').value = movie ? movie.status : 'now';
-    qs('#f-synopsis').value = movie ? movie.synopsis : '';
+    qs('#f-synopsis').value = movie ? (movie.synopsis || '') : '';
     backdrop.classList.add('open');
   }
+
   qs('#addMovieBtn').addEventListener('click', ()=>openModal(null));
   qs('#closeModal').addEventListener('click', ()=>backdrop.classList.remove('open'));
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.classList.remove('open'); });
 
-  qs('#movieForm').addEventListener('submit', e=>{
+  qs('#movieForm').addEventListener('submit', async e=>{
     e.preventDefault();
-    const movies = DB.getMovies();
-    const id = qs('#f-id').value;
-    const data = {
+    /* Field names match the API, not the mock: `certificate` is the
+       censor rating and `rating` is the numeric score. */
+    const body = {
       title: qs('#f-title').value.trim(),
       genre: qs('#f-genre').value.trim(),
-      lang: qs('#f-lang').value.trim(),
+      language: qs('#f-lang').value.trim(),
       duration: Number(qs('#f-duration').value),
-      rating: qs('#f-rating').value,
+      certificate: qs('#f-certificate').value,
       status: qs('#f-status').value,
       synopsis: qs('#f-synopsis').value.trim(),
-      score: 7.5
+      rating: qs('#f-score').value === '' ? null : Number(qs('#f-score').value)
     };
-    if(id){
-      const idx = movies.findIndex(m=>m.id===id);
-      movies[idx] = {...movies[idx], ...data};
-    } else {
-      movies.push({ id:'m'+Date.now(), ...data });
+    try {
+      if(editingId != null) await api.updateMovie(editingId, body);
+      else await api.createMovie(body);
+      backdrop.classList.remove('open');
+      toast('Movie saved');
+      renderTable();
+    } catch(err) {
+      const fields = isApiError(err) ? err.byField() : {};
+      toast(fields.title || fields.duration || (isApiError(err) ? err.message : 'Save failed'));
     }
-    DB.saveMovies(movies);
-    backdrop.classList.remove('open');
-    toast('Movie saved');
-    renderTable();
   });
 
   renderTable();
-}
+})();
 </script>
 </body>
 </html>

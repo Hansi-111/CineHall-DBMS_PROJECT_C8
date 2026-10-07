@@ -17,71 +17,102 @@
 
 <div class="container" style="max-width:520px; padding:40px 28px 60px;" id="page"></div>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-if(requireAuth()){
+(async () => {
+  if(!api.requireAuth()) return;
 
-const pending = JSON.parse(sessionStorage.getItem('ch_pending_booking')||'null');
-const page = qs('#page');
+  const page = qs('#page');
+  const user = api.user();
 
-if(!pending){
-  page.innerHTML = `<div class="empty-state"><div class="h-display">Nothing to check out</div><a href="index.html" style="color:var(--gold)">Browse movies</a></div>`;
-} else {
-  const show = DB.getShow(pending.showId);
-  const movie = DB.getMovie(show.movieId);
-  const session = DB.getSession();
+  /* The mock used to hand the next page a string id like "s3" and an
+     array of labels. Anything that is not the current integer-id
+     shape is a leftover from before the migration, so drop it. */
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem('ch_pending_booking') || 'null'); } catch { pending = null; }
+  if(pending && (!Number.isInteger(pending.showId) || !Array.isArray(pending.seatIds) || !pending.seatIds.length)) {
+    pending = null;
+  }
+
+  if(!pending){
+    page.innerHTML = `<div class="empty-state"><div class="h-display">Nothing to check out</div><a href="index.html" style="color:var(--gold)">Browse movies</a></div>`;
+    return;
+  }
+
+  renderLoading(page, 'Preparing checkout…');
+
+  let show, movie;
+  try {
+    show = await api.showtime(pending.showId);
+    movie = await api.movie(show.movieId);
+  } catch(err) {
+    renderError(page, err);
+    return;
+  }
 
   page.innerHTML = `
     <p class="eyebrow" style="margin-bottom:14px;">Checkout</p>
     <div class="card" style="margin-bottom:20px;">
-      <p style="font-weight:700;">${movie.title}</p>
-      <p class="muted" style="font-size:.86rem; margin-top:4px;">${show.cinema} · ${fmtDate(show.date)} · ${show.time}</p>
-      <p class="mono" style="margin-top:10px; color:var(--gold);">${pending.seats.join(', ')}</p>
+      <p style="font-weight:700;">${escapeHtml(movie.title)}</p>
+      <p class="muted" style="font-size:.86rem; margin-top:4px;">${escapeHtml(show.cinema)} · ${fmtDate(show.date)} · ${show.time}</p>
+      <p class="mono" style="margin-top:10px; color:var(--gold);">${escapeHtml(pending.seatLabels ? pending.seatLabels.join(', ') : '')}</p>
       <p style="margin-top:10px; display:flex; justify-content:space-between; border-top:1px solid var(--border-soft); padding-top:10px;">
         <span class="muted">Total</span><span class="h-display" style="font-size:1.3rem;">₹${pending.total}</span>
       </p>
     </div>
 
+    <div class="card" style="margin-bottom:20px; padding:16px;">
+      <p class="muted" style="font-size:.82rem;">Booking for</p>
+      <p style="font-weight:700; margin-top:4px;">${escapeHtml(user.name)}</p>
+      <p class="muted" style="font-size:.84rem;">${escapeHtml(user.email)}</p>
+      <p class="muted" style="font-size:.76rem; margin-top:8px;">Tickets are issued to the account you are signed in with.</p>
+    </div>
+
     <form id="checkoutForm">
       <div class="field">
-        <label for="name">Full name</label>
-        <input id="name" required value="${session?session.name:''}" placeholder="As on ID">
+        <label>Payment method</label>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:6px;">
+          ${PAYMENT_METHODS.map((m, i)=>`
+            <label style="display:flex; gap:6px; align-items:center; font-size:.9rem; cursor:pointer;">
+              <input type="radio" name="paymentMethod" value="${m.value}" ${i===0?'checked':''}> ${m.label}
+            </label>`).join('')}
+        </div>
       </div>
-      <div class="field">
-        <label for="email">Email</label>
-        <input id="email" type="email" required value="${session?session.email:''}" placeholder="you@example.com">
-      </div>
-      <div class="field">
-        <label for="phone">Phone</label>
-        <input id="phone" required placeholder="10-digit mobile number">
-      </div>
-      <button class="btn btn-gold btn-block" type="submit">Pay ₹${pending.total} & Confirm</button>
+      <button class="btn btn-gold btn-block" type="submit" id="payBtn">Pay ₹${pending.total} &amp; Confirm</button>
     </form>
   `;
 
-  qs('#checkoutForm').addEventListener('submit', (e)=>{
+  qs('#checkoutForm').addEventListener('submit', async (e)=>{
     e.preventDefault();
-    const booking = {
-      id: 'b'+Date.now(),
-      showId: show.id,
-      movieId: movie.id,
-      seats: pending.seats,
-      total: pending.total,
-      name: qs('#name').value.trim(),
-      email: qs('#email').value.trim(),
-      phone: qs('#phone').value.trim(),
-      code: genCode(),
-      status: 'confirmed',
-      timestamp: new Date().toISOString()
-    };
-    DB.addBooking(booking);
-    sessionStorage.removeItem('ch_pending_booking');
-    sessionStorage.setItem('ch_last_booking', JSON.stringify(booking));
-    location.href = 'confirmation.html';
-  });
-}
+    const payBtn = qs('#payBtn');
+    const paymentMethod = (qs('input[name="paymentMethod"]:checked') || {}).value || 'upi';
 
-}
+    payBtn.disabled = true;
+    payBtn.textContent = 'Processing…';
+    try {
+      /* The server prices the seats and issues the ticket code, so
+         nothing about the amount is trusted from this page. */
+      const booking = await api.createBooking({
+        showtimeId: pending.showId,
+        seatIds: pending.seatIds,
+        paymentMethod
+      });
+      sessionStorage.removeItem('ch_pending_booking');
+      location.href = `confirmation.html?id=${booking.id}`;
+    } catch(err) {
+      payBtn.disabled = false;
+      payBtn.innerHTML = `Pay ₹${pending.total} &amp; Confirm`;
+      /* A 409 means the seats went while the form was open; send the
+         user back to pick again rather than leaving them stuck. */
+      toast(isApiError(err) ? err.message : 'Payment failed');
+      if(isApiError(err) && err.status === 409){
+        sessionStorage.removeItem('ch_pending_booking');
+        setTimeout(()=> location.href = `seats.html?showId=${pending.showId}`, 1200);
+      }
+    }
+  });
+})();
 </script>
 </body>
 </html>

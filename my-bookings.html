@@ -6,6 +6,7 @@
 <title>My Bookings — CineHall</title>
 <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
 <nav class="topnav">
@@ -30,58 +31,82 @@
   <div id="bookingsList" style="margin-top:20px; display:flex; flex-direction:column; gap:14px;"></div>
 </div>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-const listEl = qs('#bookingsList');
-const session = DB.getSession();
-if(session) qs('#emailFilter').value = session.email;
+(async () => {
+  const listEl = qs('#bookingsList');
+  const session = api.user();
 
-function render(){
-  const email = qs('#emailFilter').value.trim().toLowerCase();
-  const bookings = DB.getBookings().filter(b => !email || b.email.toLowerCase()===email);
+  /* Signed-in users default to their own email; guests can still look
+     up by typing one. Either way the server does the filtering. */
+  if(session && session.email) qs('#emailFilter').value = session.email;
 
-  if(!bookings.length){
-    listEl.innerHTML = `<div class="empty-state"><div class="h-display">No bookings found</div><p>Enter the email you used at checkout, or make a new booking.</p></div>`;
-    return;
+  async function render(){
+    const email = qs('#emailFilter').value.trim();
+    renderLoading(listEl, 'Looking up bookings…');
+
+    try {
+      /* The list endpoint already carries the movie title, theatre,
+         date, time and seat labels, so no per-booking follow-up
+         requests are needed. */
+      const bookings = await api.bookings(email ? { q: email } : {});
+
+      if(!bookings.length){
+        listEl.innerHTML = `<div class="empty-state"><div class="h-display">No bookings found</div><p>Enter the email you used at checkout, or make a new booking.</p></div>`;
+        return;
+      }
+
+      listEl.innerHTML = bookings.map(b=>{
+        const badgeClass = b.status==='cancelled' ? 'status-cancelled' : 'status-confirmed';
+        const seatLabels = (b.seats || []).join(', ');
+        return `
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <p style="font-weight:700;">${escapeHtml(b.movieTitle)}</p>
+            <p class="muted" style="font-size:.84rem; margin-top:2px;">${escapeHtml(b.cinema)} · ${fmtDate(b.date)} · ${b.time} · <span class="mono">${escapeHtml(seatLabels)}</span></p>
+          </div>
+          <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+            <div>
+              <span class="status-badge ${badgeClass}">${b.status}</span>
+              <p class="mono" style="margin-top:6px; color:var(--gold); font-size:.86rem;">${escapeHtml(b.code)}</p>
+            </div>
+            ${b.canCancel
+              ? `<button class="btn btn-danger btn-sm" data-cancel="${b.id}">Cancel Ticket</button>`
+              : (b.status==='confirmed' ? `<span class="muted" style="font-size:.76rem;">Cannot cancel now</span>` : '')}
+          </div>
+        </div>`;
+      }).join('');
+
+      /* Bound after every render: the buttons are recreated each time,
+         so listeners attached once at load would go stale. */
+      qsa('[data-cancel]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          if(!confirm('Cancel this ticket? This cannot be undone.')) return;
+          btn.disabled = true;
+          try {
+            await api.cancelBooking(btn.dataset.cancel);
+            toast('Ticket cancelled');
+            render();
+          } catch(err) {
+            btn.disabled = false;
+            toast(isApiError(err) ? err.message : 'Cancel failed');
+          }
+        });
+      });
+    } catch(err) {
+      renderError(listEl, err);
+    }
   }
-  const today = new Date().toISOString().slice(0,10);
-  listEl.innerHTML = bookings.map(b=>{
-    const show = DB.getShow(b.showId);
-    const movie = DB.getMovie(b.movieId);
-    if(!show || !movie) return '';
-    const badgeClass = b.status==='cancelled' ? 'status-cancelled' : 'status-confirmed';
-    const isPast = show.date < today;
-    const canCancel = b.status==='confirmed' && !isPast;
-    return `
-    <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-      <div>
-        <p style="font-weight:700;">${movie.title}</p>
-        <p class="muted" style="font-size:.84rem; margin-top:2px;">${show.cinema} · ${fmtDate(show.date)} · ${show.time} · <span class="mono">${b.seats.join(', ')}</span></p>
-      </div>
-      <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
-        <div>
-          <span class="status-badge ${badgeClass}">${b.status}</span>
-          <p class="mono" style="margin-top:6px; color:var(--gold); font-size:.86rem;">${b.code}</p>
-        </div>
-        ${canCancel
-          ? `<button class="btn btn-danger btn-sm" data-cancel="${b.id}">Cancel Ticket</button>`
-          : (b.status==='confirmed' && isPast ? `<span class="muted" style="font-size:.76rem;">Show has passed</span>` : '')}
-      </div>
-    </div>`;
-  }).join('');
 
-  qsa('[data-cancel]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Cancel this ticket? This cannot be undone.')) return;
-      DB.cancelBooking(btn.dataset.cancel);
-      toast('Ticket cancelled');
-      render();
-    });
+  let timer;
+  qs('#emailFilter').addEventListener('input', ()=>{
+    /* Debounced: without it every keystroke fires a request. */
+    clearTimeout(timer);
+    timer = setTimeout(render, 300);
   });
-}
-
-qs('#emailFilter').addEventListener('input', render);
-render();
+  render();
+})();
 </script>
 </body>
 </html>

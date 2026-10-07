@@ -7,90 +7,128 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script src="admin-shell.js"></script>
 <script>
-const ui = renderAdminShell('shows');
-if(ui){
+(async () => {
+  const ui = renderAdminShell('shows');
+  if(!ui) return;
   ui.setTitle('Showtimes');
   ui.topbarRight.innerHTML = `<button class="btn btn-gold btn-sm" id="addShowBtn">+ Add Showtime</button>`;
 
-  function renderTable(){
-    const shows = DB.getShows();
-    ui.content.innerHTML = `
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Movie</th><th>Cinema</th><th>Date</th><th>Time</th><th>Prices (S/G/P)</th><th>Booked</th><th></th></tr></thead>
-          <tbody>
-            ${shows.map(s=>{
-              const movie = DB.getMovie(s.movieId);
-              return `<tr>
-                <td style="font-weight:700;">${movie ? movie.title : '—'}</td>
-                <td>${s.cinema}</td>
-                <td>${fmtDate(s.date)}</td>
-                <td class="mono">${s.time}</td>
-                <td class="mono">₹${s.price.silver}/₹${s.price.gold}/₹${s.price.premium}</td>
-                <td>${s.bookedSeats.length} seats</td>
-                <td><button class="icon-btn" data-del="${s.id}" title="Delete">✕</button></td>
-              </tr>`;
-            }).join('') || `<tr><td colspan="7" class="muted" style="text-align:center; padding:30px;">No showtimes scheduled.</td></tr>`}
-          </tbody>
-        </table>
-      </div>
-    `;
-    qsa('[data-del]').forEach(b=>b.addEventListener('click', ()=>{
-      if(!confirm('Remove this showtime?')) return;
-      DB.saveShows(DB.getShows().filter(s=>s.id!==b.dataset.del));
-      toast('Showtime removed');
-      renderTable();
-    }));
+  let movies = [], theatres = [], shows = [];
+
+  async function renderTable(){
+    renderLoading(ui.content, 'Loading showtimes…');
+    try {
+      /* includePast: the console wants the full schedule, not just
+         what is still to come. */
+      shows = await api.showtimes({ includePast: true });
+      ui.content.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Movie</th><th>Cinema</th><th>Screen</th><th>Date</th><th>Time</th><th>Prices (S/G/P)</th><th>Booked</th><th></th></tr></thead>
+            <tbody>
+              ${shows.map(s=>`
+                <tr>
+                  <td style="font-weight:700;">${escapeHtml(s.movieTitle || '—')}</td>
+                  <td>${escapeHtml(s.cinema)}</td>
+                  <td>${s.screen}</td>
+                  <td>${fmtDate(s.date)}</td>
+                  <td class="mono">${s.time}</td>
+                  <td class="mono">₹${s.price.silver}/₹${s.price.gold}/₹${s.price.premium}</td>
+                  <td>${s.seatsBooked} seats</td>
+                  <td><button class="icon-btn" data-del="${s.id}" title="Delete">✕</button></td>
+                </tr>`).join('') || `<tr><td colspan="8" class="muted" style="text-align:center; padding:30px;">No showtimes scheduled.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      `;
+      qsa('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
+        if(!confirm('Remove this showtime?')) return;
+        try {
+          await api.deleteShowtime(b.dataset.del);
+          toast('Showtime removed');
+          renderTable();
+        } catch(err) {
+          /* 409 when bookings still reference the showtime. */
+          toast(isApiError(err) ? err.message : 'Delete failed');
+        }
+      }));
+    } catch(err) {
+      renderError(ui.content, err);
+    }
   }
 
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
-  const movies = DB.getMovies();
-  backdrop.innerHTML = `
-    <div class="modal">
-      <div class="modal-head"><h3>Add Showtime</h3><button class="icon-btn" id="closeModal">✕</button></div>
-      <form id="showForm">
-        <div class="field"><label for="f-movie">Movie</label>
-          <select id="f-movie">${movies.map(m=>`<option value="${m.id}">${m.title}</option>`).join('')}</select>
-        </div>
-        <div class="field"><label for="f-cinema">Cinema</label><input id="f-cinema" required placeholder="CineHall Downtown"></div>
-        <div class="field"><label for="f-date">Date</label><input id="f-date" type="date" required></div>
-        <div class="field"><label for="f-time">Time</label><input id="f-time" required placeholder="e.g. 7:15 PM"></div>
-        <div class="field"><label for="f-silver">Silver price</label><input id="f-silver" type="number" value="150" required></div>
-        <div class="field"><label for="f-gold">Gold price</label><input id="f-gold" type="number" value="220" required></div>
-        <div class="field"><label for="f-premium">Premium price</label><input id="f-premium" type="number" value="320" required></div>
-        <button class="btn btn-gold btn-block" type="submit">Save Showtime</button>
-      </form>
-    </div>`;
   document.body.appendChild(backdrop);
 
-  qs('#addShowBtn').addEventListener('click', ()=>backdrop.classList.add('open'));
-  qs('#closeModal').addEventListener('click', ()=>backdrop.classList.remove('open'));
-  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.classList.remove('open'); });
+  /* The form needs the movie list and every screen under a theatre.
+     Both are loaded once, up front, so opening the modal is instant.
+     The old form took a free-text cinema name, which could not be
+     joined to a screen; this one picks the real screen instead. */
+  async function openModal(){
+    if(!movies.length || !theatres.length) return;
+    backdrop.innerHTML = `
+      <div class="modal">
+        <div class="modal-head"><h3>Add Showtime</h3><button class="icon-btn" id="closeModal">✕</button></div>
+        <form id="showForm">
+          <div class="field"><label for="f-movie">Movie</label>
+            <select id="f-movie">${movies.map(m=>`<option value="${m.id}">${escapeHtml(m.title)}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label for="f-screen">Screen</label>
+            <select id="f-screen">${theatres.flatMap(t=>t.screens.map(sc=>
+              `<option value="${sc.id}">${escapeHtml(t.name)} · Screen ${sc.number} (${sc.capacity} seats)</option>`
+            )).join('')}</select>
+          </div>
+          <div class="field"><label for="f-date">Date</label><input id="f-date" type="date" required></div>
+          <div class="field"><label for="f-time">Time</label><input id="f-time" type="time" required></div>
+          <div class="field"><label for="f-silver">Silver price</label><input id="f-silver" type="number" min="0" value="150" required></div>
+          <div class="field"><label for="f-gold">Gold price</label><input id="f-gold" type="number" min="0" value="220" required></div>
+          <div class="field"><label for="f-premium">Premium price</label><input id="f-premium" type="number" min="0" value="320" required></div>
+          <button class="btn btn-gold btn-block" type="submit">Save Showtime</button>
+        </form>
+      </div>`;
+    qs('#closeModal').addEventListener('click', ()=>backdrop.classList.remove('open'));
+    backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.classList.remove('open'); });
 
-  qs('#showForm').addEventListener('submit', e=>{
-    e.preventDefault();
-    const shows = DB.getShows();
-    shows.push({
-      id:'s'+Date.now(),
-      movieId: qs('#f-movie').value,
-      cinema: qs('#f-cinema').value.trim(),
-      date: qs('#f-date').value,
-      time: qs('#f-time').value.trim(),
-      price:{ silver:Number(qs('#f-silver').value), gold:Number(qs('#f-gold').value), premium:Number(qs('#f-premium').value) },
-      bookedSeats: []
+    qs('#showForm').addEventListener('submit', async e=>{
+      e.preventDefault();
+      const body = {
+        movie_id: Number(qs('#f-movie').value),
+        screen_id: Number(qs('#f-screen').value),
+        show_date: qs('#f-date').value,
+        show_time: qs('#f-time').value,
+        silver_price: Number(qs('#f-silver').value),
+        gold_price: Number(qs('#f-gold').value),
+        premium_price: Number(qs('#f-premium').value)
+      };
+      try {
+        await api.createShowtime(body);
+        backdrop.classList.remove('open');
+        toast('Showtime added');
+        renderTable();
+      } catch(err) {
+        const fields = isApiError(err) ? err.byField() : {};
+        toast(fields.screen_id || fields.show_date || (isApiError(err) ? err.message : 'Save failed'));
+      }
     });
-    DB.saveShows(shows);
-    backdrop.classList.remove('open');
-    toast('Showtime added');
-    renderTable();
-  });
 
+    backdrop.classList.add('open');
+  }
+
+  qs('#addShowBtn').addEventListener('click', openModal);
+
+  try {
+    [movies, theatres] = await Promise.all([api.movies(), api.theatres()]);
+  } catch(err) {
+    renderError(ui.content, err);
+    return;
+  }
   renderTable();
-}
+})();
 </script>
 </body>
 </html>

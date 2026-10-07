@@ -7,7 +7,8 @@ development.
 ```bash
 npm start          # http://localhost:3000
 npm run dev        # same, with nodemon
-npm run api:test   # 88 end-to-end checks against a running server
+npm run api:test   # 112 end-to-end checks against a running server
+npm run web:test   # 94 checks of api.js against the live server
 ```
 
 The server reads `DATABASE_URL` and `JWT_SECRET` from `.env` at the repo
@@ -181,7 +182,7 @@ the revenue number. `seats_sold` likewise counts only confirmed bookings.
 
 ## Tests
 
-`npm run api:test` runs 88 checks against a running server: auth and
+`npm run api:test` runs 112 checks against a running server: auth and
 validation, role enforcement, movie and showtime CRUD, seat map state,
 the booking transaction, ownership isolation, the cancellation window, and
 the admin dashboard.
@@ -204,3 +205,35 @@ correctly but for the wrong reason.
   load test and no long-running transaction test.
 - Cancellation is not wired to a real payment provider, so refunds are
   recorded in `cancellation.refund_status` but never actually issued.
+
+## Frontend
+
+The static pages in the repository root are served by this same server.
+They no longer keep any state in `localStorage` (the old `DB.*` mock has
+been removed); every page reads and writes through `api.js`, a small
+fetch client loaded before `script.js`.
+
+`api.js` provides:
+
+- `request()` / `ApiError` — one transport path, with the server's
+  per-field `errors` array surfaced as `err.byField()`.
+- `token()`, `user()`, `setSession()`, `clearSession()`, `isStaff()`,
+  `requireAuth()`, `requireStaff()` — the session store and page guards.
+  These are exposed both as globals and on the `api` object.
+- view-model mappers (`toMovie`, `toShow`, `toSeat`, `toBooking`, …)
+  that translate schema field names into the names the pages use, so the
+  `certificate` / `rating` swap happens in exactly one place.
+- one method per endpoint (`api.movies()`, `api.seatmap(id)`,
+  `api.createBooking(...)`, …).
+
+### Frontend tests
+
+`npm run web:test` loads `api.js` into a sandbox with fake
+`localStorage`/`location` and runs 94 checks against the live server. It
+covers the mappers, the session store, auth guards, the booking round
+trip, and the 2-hour cancellation boundary (evaluated against the
+database's clock, not the test host's). It cleans up the rows it creates
+through `pg` so it can be run repeatedly without a reset.
+
+`web:test` needs the server running and the same `DATABASE_URL` the
+server uses.

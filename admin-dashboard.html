@@ -7,48 +7,63 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script src="admin-shell.js"></script>
 <script>
-const ui = renderAdminShell('dashboard');
-if(ui){
+(async () => {
+  const ui = renderAdminShell('dashboard');
+  if(!ui) return;
   ui.setTitle('Dashboard');
 
-  const movies = DB.getMovies();
-  const shows = DB.getShows();
-  const bookings = DB.getBookings();
-  const revenue = bookings.reduce((s,b)=>s+b.total, 0);
-  const seatsSold = bookings.reduce((s,b)=>s+b.seats.length, 0);
+  renderLoading(ui.content, 'Loading dashboard…');
 
-  ui.content.innerHTML = `
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-num">${movies.length}</div><div class="stat-label">Movies listed</div></div>
-      <div class="stat-card"><div class="stat-num">${shows.length}</div><div class="stat-label">Active showtimes</div></div>
-      <div class="stat-card"><div class="stat-num">${bookings.length}</div><div class="stat-label">Tickets booked</div></div>
-      <div class="stat-card"><div class="stat-num">₹${revenue}</div><div class="stat-label">Revenue (${seatsSold} seats)</div></div>
-    </div>
+  try {
+    /* Stats are aggregated in the database; the page does not sum
+       rows itself. recentBookings already carries the movie title,
+       theatre and time it displays, so no follow-up lookups. */
+    const [{ stats }, recent] = await Promise.all([
+      api.stats(),
+      api.recentBookings(8)
+    ]);
 
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Ticket</th><th>Movie</th><th>Show</th><th>Seats</th><th>Amount</th><th>Status</th></tr></thead>
-        <tbody>
-          ${bookings.slice(0,8).map(b=>{
-            const show = DB.getShow(b.showId), movie = DB.getMovie(b.movieId);
-            if(!show||!movie) return '';
-            return `<tr>
-              <td class="mono">${b.code}</td>
-              <td>${movie.title}</td>
-              <td>${fmtDate(show.date)} · ${show.time}</td>
-              <td class="mono">${b.seats.join(', ')}</td>
-              <td>₹${b.total}</td>
-              <td><span class="status-badge status-confirmed">${b.status}</span></td>
-            </tr>`;
-          }).join('') || `<tr><td colspan="6" class="muted" style="text-align:center; padding:30px;">No bookings yet</td></tr>`}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
+    ui.content.innerHTML = `
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${stats.movies_now_showing}</div><div class="stat-label">Now showing</div></div>
+        <div class="stat-card"><div class="stat-num">${stats.showtimes_upcoming}</div><div class="stat-label">Upcoming showtimes</div></div>
+        <div class="stat-card"><div class="stat-num">${stats.bookings_confirmed}</div><div class="stat-label">Confirmed tickets</div></div>
+        <div class="stat-card"><div class="stat-num">₹${stats.revenue_confirmed}</div><div class="stat-label">Revenue (${stats.seats_sold} seats)</div></div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${stats.movies_total}</div><div class="stat-label">Movies listed</div></div>
+        <div class="stat-card"><div class="stat-num">${stats.theatres}</div><div class="stat-label">Theatres (${stats.screens} screens)</div></div>
+        <div class="stat-card"><div class="stat-num">${stats.customers}</div><div class="stat-label">Customers</div></div>
+        <div class="stat-card"><div class="stat-num">${stats.bookings_cancelled}</div><div class="stat-label">Cancellations</div></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticket</th><th>Customer</th><th>Movie</th><th>Show</th><th>Seats</th><th>Amount</th><th>Status</th></tr></thead>
+          <tbody>
+            ${recent.map(b=>`
+              <tr>
+                <td class="mono">${escapeHtml(b.ticket_code)}</td>
+                <td>${escapeHtml(b.customer_name)}<br><span class="muted" style="font-size:.76rem;">${escapeHtml(b.customer_email)}</span></td>
+                <td>${escapeHtml(b.movie_title)}</td>
+                <td>${fmtDate(b.show_date)} · ${b.show_time}</td>
+                <td class="mono">${b.seat_count}</td>
+                <td>₹${b.total_amount}</td>
+                <td><span class="status-badge ${b.status==='cancelled'?'status-cancelled':'status-confirmed'}">${b.status}</span></td>
+              </tr>`).join('') || `<tr><td colspan="7" class="muted" style="text-align:center; padding:30px;">No bookings yet</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch(err) {
+    renderError(ui.content, err);
+  }
+})();
 </script>
 </body>
 </html>

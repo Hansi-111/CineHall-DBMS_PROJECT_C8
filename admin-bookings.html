@@ -7,53 +7,70 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script src="admin-shell.js"></script>
 <script>
-const ui = renderAdminShell('bookings');
-if(ui){
+(async () => {
+  const ui = renderAdminShell('bookings');
+  if(!ui) return;
   ui.setTitle('Bookings');
   ui.topbarRight.innerHTML = `<input id="searchBox" placeholder="Search by name, email, or code" style="background:var(--bg-raised); border:1px solid var(--border); border-radius:8px; padding:9px 13px; color:var(--text); width:240px;">`;
 
-  function renderTable(){
-    const q = (qs('#searchBox')?.value || '').toLowerCase();
-    const bookings = DB.getBookings().filter(b =>
-      !q || b.name.toLowerCase().includes(q) || b.email.toLowerCase().includes(q) || b.code.toLowerCase().includes(q)
-    );
+  async function renderTable(){
+    const q = qs('#searchBox') ? qs('#searchBox').value.trim() : '';
+    renderLoading(ui.content, 'Loading bookings…');
 
-    ui.content.innerHTML = `
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Code</th><th>Customer</th><th>Movie</th><th>Show</th><th>Seats</th><th>Amount</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            ${bookings.map(b=>{
-              const show = DB.getShow(b.showId), movie = DB.getMovie(b.movieId);
-              return `<tr>
-                <td class="mono">${b.code}</td>
-                <td>${b.name}<br><span class="muted" style="font-size:.76rem;">${b.email}</span></td>
-                <td>${movie ? movie.title : '—'}</td>
-                <td>${show ? `${fmtDate(show.date)} · ${show.time}` : '—'}</td>
-                <td class="mono">${b.seats.join(', ')}</td>
-                <td>₹${b.total}</td>
-                <td><span class="status-badge ${b.status==='cancelled'?'status-cancelled':'status-confirmed'}">${b.status}</span></td>
-                <td>${b.status!=='cancelled' ? `<button class="icon-btn" data-cancel="${b.id}" title="Cancel">✕</button>` : ''}</td>
-              </tr>`;
-            }).join('') || `<tr><td colspan="8" class="muted" style="text-align:center; padding:30px;">No bookings match.</td></tr>`}
-          </tbody>
-        </table>
-      </div>
-    `;
-    qsa('[data-cancel]').forEach(b=>b.addEventListener('click', ()=>{
-      if(!confirm('Cancel this booking?')) return;
-      DB.cancelBooking(b.dataset.cancel);
-      toast('Booking cancelled');
-      renderTable();
-    }));
+    try {
+      /* The server does the matching (name/email/ticket code); the
+         page no longer loads every booking and filters in the DOM. */
+      const bookings = await api.bookings(q ? { q } : {});
+      ui.content.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Code</th><th>Customer</th><th>Movie</th><th>Show</th><th>Seats</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              ${bookings.map(b=>`
+                <tr>
+                  <td class="mono">${escapeHtml(b.code)}</td>
+                  <td>${escapeHtml(b.name)}<br><span class="muted" style="font-size:.76rem;">${escapeHtml(b.email)}</span></td>
+                  <td>${escapeHtml(b.movieTitle || '—')}</td>
+                  <td>${fmtDate(b.date)} · ${b.time}</td>
+                  <td class="mono">${escapeHtml((b.seats || []).join(', '))}</td>
+                  <td>₹${b.total}</td>
+                  <td><span class="status-badge ${b.status==='cancelled'?'status-cancelled':'status-confirmed'}">${b.status}</span></td>
+                  <td>${b.status!=='cancelled' ? `<button class="icon-btn" data-cancel="${b.id}" title="Cancel">✕</button>` : ''}</td>
+                </tr>`).join('') || `<tr><td colspan="8" class="muted" style="text-align:center; padding:30px;">No bookings match.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      `;
+      qsa('[data-cancel]').forEach(btn=>btn.addEventListener('click', async ()=>{
+        if(!confirm('Cancel this booking?')) return;
+        btn.disabled = true;
+        try {
+          /* Staff may cancel inside the customer's 2-hour window; the
+             server allows it for a staff token by design. */
+          await api.cancelBooking(btn.dataset.cancel);
+          toast('Booking cancelled');
+          renderTable();
+        } catch(err) {
+          btn.disabled = false;
+          toast(isApiError(err) ? err.message : 'Cancel failed');
+        }
+      }));
+    } catch(err) {
+      renderError(ui.content, err);
+    }
   }
 
-  qs('#searchBox').addEventListener('input', renderTable);
+  let timer;
+  qs('#searchBox').addEventListener('input', ()=>{
+    clearTimeout(timer);
+    timer = setTimeout(renderTable, 300);
+  });
   renderTable();
-}
+})();
 </script>
 </body>
 </html>

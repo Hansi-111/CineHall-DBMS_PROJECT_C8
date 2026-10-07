@@ -6,6 +6,7 @@
 <title>CineHall — Book Movie Tickets</title>
 <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
 <nav class="topnav">
@@ -50,30 +51,34 @@
   <div class="container">CineHall · DBMS demo project · dark hall, bright screen</div>
 </footer>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-initNavToggle();
+(async () => {
+  initNavToggle();
 
-function updateNavbar(){
-  const session = DB.getSession();
-  const authArea = qs('#authArea');
-
-  if(session && session.role === 'customer'){
-    authArea.innerHTML = `
-      <a href="profile.html">👤 ${session.name}</a>
-      <a href="#" id="logoutBtn" style="margin-left:14px; color:var(--gold);">Logout</a>
-    `;
-
-    qs('#logoutBtn').addEventListener('click', (e)=>{
-      e.preventDefault();
-      DB.clearSession();
-      toast('Signed out');
-      location.reload();
-    });
-  } else {
-    authArea.innerHTML = `<a href="login.html">Sign In</a>`;
+  try {
+    const movies = await api.movies();
+    qs('#nowShowingRow').innerHTML = movies.filter(m=>m.status==='now').map(renderCard).join('');
+    qs('#upcomingGrid').innerHTML = movies.filter(m=>m.status==='upcoming').map(renderCard).join('');
+  } catch(err) {
+    renderError(qs('#nowShowingRow'), err);
+    renderError(qs('#upcomingGrid'), err);
   }
-}
+
+  const session = api.user();
+  updateNavbar(session);
+
+  qs('#myBookingsLink').addEventListener('click', (e)=>{
+    e.preventDefault();
+    if(!api.user()){
+      toast('Sign in to view your bookings');
+      location.href = 'login.html';
+      return;
+    }
+    location.href = 'my-bookings.html';
+  });
+})();
 
 function posterArt(movie){
   const hues = {
@@ -85,7 +90,7 @@ function posterArt(movie){
     'Historical':'#8a6b3a'
   };
   const c = hues[movie.genre] || '#e3b23c';
-  return `background:linear-gradient(160deg, ${c}33, transparent 60%), var(--surface-2);`;
+  return `background:linear-gradient(160deg, ${c}33, transparent 60%), var(--surface-2)`;
 }
 
 function renderCard(m){
@@ -106,29 +111,22 @@ function renderCard(m){
   </a>`;
 }
 
-const movies = DB.getMovies();
-
-qs('#nowShowingRow').innerHTML =
-  movies.filter(m=>m.status==='now').map(renderCard).join('');
-
-qs('#upcomingGrid').innerHTML =
-  movies.filter(m=>m.status==='upcoming').map(renderCard).join('');
-
-updateNavbar();
-
-qs('#myBookingsLink').addEventListener('click', (e)=>{
-  e.preventDefault();
-  const session = DB.getSession();
-
-  if(!session){
-    toast('Sign in to view your bookings');
-    location.href = 'login.html';
-    return;
+function updateNavbar(session){
+  const authArea = qs('#authArea');
+  if(session && session.role === 'customer'){
+    authArea.innerHTML = `
+      <a href="profile.html">👤 ${session.name}</a>
+      <a href="#" id="logoutBtn" style="margin-left:14px; color:var(--gold);">Logout</a>`;
+    qs('#logoutBtn').addEventListener('click', (e)=>{
+      e.preventDefault();
+      api.clearSession();
+      toast('Signed out');
+      location.reload();
+    });
+  } else {
+    authArea.innerHTML = `<a href="login.html">Sign In</a>`;
   }
-
-  location.href = 'my-bookings.html';
-});
+}
 </script>
-
 </body>
 </html>

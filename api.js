@@ -138,10 +138,18 @@ function setSession(jwt, usr) {
 function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
-  /* Also drop the old mock's key, or a stale value could be read by
-     anything still looking for it. */
-  localStorage.removeItem('ch_session');
 }
+
+/* One-time cleanup of the keys the localStorage mock left behind.
+   Nothing reads them any more, but a stale mock session or old show
+   list can linger in a returning visitor's browser and waste quota.
+   Runs once, on load, before any page script. */
+(function purgeLegacyMockKeys(){
+  if (typeof localStorage === 'undefined') return;
+  ['ch_movies', 'ch_shows', 'ch_bookings', 'ch_session'].forEach((k) => {
+    try { localStorage.removeItem(k); } catch { /* storage disabled */ }
+  });
+})();
 
 function isStaff() {
   const u = user();
@@ -303,6 +311,12 @@ function toTheatre(t) {
    already mapped, so a caller never touches an API field name. */
 
 const api = {
+  /* The session helpers live on the namespace too, so a page has one
+     object to talk to: api.login(), api.user(), api.requireAuth().
+     (view-model-check.js also reads them as bare globals — both work,
+     they are the same function objects.) */
+  token, user, setSession, clearSession, isStaff, requireAuth, requireStaff,
+
   // health
   health() { return request('/health', { auth: false }); },
 
