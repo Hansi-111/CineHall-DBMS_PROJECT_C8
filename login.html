@@ -28,7 +28,8 @@
       <form id="signupForm" style="display:none;">
         <div class="field"><label for="su-name">Full name</label><input id="su-name" required></div>
         <div class="field"><label for="su-email">Email</label><input id="su-email" type="email" required></div>
-        <div class="field"><label for="su-pass">Password</label><input id="su-pass" type="password" required></div>
+        <div class="field"><label for="su-phone">Phone</label><input id="su-phone" type="tel" required placeholder="+911234567890"></div>
+        <div class="field"><label for="su-pass">Password</label><input id="su-pass" type="password" required minlength="8"></div>
         <button class="btn btn-gold btn-block" type="submit">Create Account</button>
       </form>
     </div>
@@ -38,7 +39,7 @@
   </div>
 </div>
 
-
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
 const tabLogin = qs('#tabLogin'),
@@ -67,30 +68,32 @@ function postLoginRedirect(){
   location.href = dest || 'profile.html';
 }
 
-loginForm.addEventListener('submit', e=>{
+loginForm.addEventListener('submit', async e=>{
   e.preventDefault();
-
-  DB.setSession({
-    name: qs('#li-email').value.split('@')[0],
-    email: qs('#li-email').value,
-    role:'customer'
-  });
-
-  toast('Signed in');
-  postLoginRedirect();
+  try {
+    await api.login(qs('#li-email').value, qs('#li-pass').value);
+    postLoginRedirect();
+  } catch(err) {
+    /* Stay on the form. Redirecting here used to bounce a wrong
+       password straight back to the sign-in page with no feedback. */
+    toast(isApiError(err) && err.errors.length ? err.errors[0].message : 'Invalid credentials');
+  }
 });
 
-signupForm.addEventListener('submit', e=>{
+signupForm.addEventListener('submit', async e=>{
   e.preventDefault();
-
-  DB.setSession({
-    name: qs('#su-name').value,
-    email: qs('#su-email').value,
-    role:'customer'
-  });
-
-  toast('Account created');
-  postLoginRedirect();
+  try {
+    await api.register({
+      name: qs('#su-name').value,
+      email: qs('#su-email').value,
+      phone: qs('#su-phone').value,
+      password: qs('#su-pass').value
+    });
+    postLoginRedirect();
+  } catch(err) {
+    const fields = isApiError(err) ? err.byField() : {};
+    toast(fields.phone || fields.email || fields.password || 'Registration failed');
+  }
 });
 </script>
 </body>

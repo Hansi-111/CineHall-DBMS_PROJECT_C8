@@ -195,6 +195,7 @@ button{cursor:pointer;}
 }
 .seat-map{display:flex; flex-direction:column; align-items:center; gap:8px; margin-bottom:24px;}
 .seat-row{display:flex; align-items:center; gap:8px;}
+.aisle{width:26px; flex-shrink:0;}
 .row-label{width:18px; font-family:var(--mono); font-size:.72rem; color:var(--text-faint); text-align:center;}
 .seat{
   width:26px; height:26px; border-radius:6px 6px 3px 3px; border:1px solid var(--border);
@@ -329,6 +330,7 @@ footer{border-top:1px solid var(--border-soft); padding:26px 0; margin-top:40px;
      row scroll horizontally as a last resort on very small phones */
   .seat-map{width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:6px;}
   .seat-row{gap:5px;}
+  .aisle{width:22px;}
   .seat{width:22px; height:22px; font-size:.56rem; border-radius:5px 5px 2px 2px; flex-shrink:0;}
   .row-label{width:14px; font-size:.64rem; flex-shrink:0;}
   .screen-arc{width:92%; height:50px; margin-bottom:28px;}

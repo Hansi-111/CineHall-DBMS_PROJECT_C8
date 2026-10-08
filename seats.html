@@ -17,65 +17,74 @@
 
 <div class="container" id="page" style="padding:30px 28px; flex:1;"></div>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-if(requireAuth()){
+(async () => {
+  if(!api.requireAuth()) return;
 
-const show = DB.getShow(getParam('showId'));
-const page = qs('#page');
+  const page = qs('#page');
+  renderLoading(page, 'Loading seat map…');
 
-if(!show){
-  page.innerHTML = `<div class="empty-state"><div class="h-display">Show not found</div><a href="index.html" style="color:var(--gold)">Back to movies</a></div>`;
-} else {
-  const movie = DB.getMovie(show.movieId);
-  page.innerHTML = `
-    <p class="eyebrow"><a href="movie-details.html?id=${movie.id}" style="color:var(--gold)">← ${movie.title}</a></p>
-    <h1 class="h-display" style="font-size:1.8rem; margin:8px 0 2px;">${movie.title}</h1>
-    <p class="muted" style="margin-bottom:24px;">${show.cinema} · ${fmtDate(show.date)} · ${show.time}</p>
+  try {
+    const { show, seats } = await api.seatmap(getParam('showId'));
+    const movie = await api.movie(show.movieId);
 
-    <div class="screen-arc"><span>Screen</span></div>
-    <div class="seat-map" id="seatMap"></div>
-    <div class="seat-legend">
-      <span><span class="dot" style="background:var(--surface-2); border:1px solid var(--border);"></span>Available</span>
-      <span><span class="dot" style="background:var(--gold);"></span>Selected</span>
-      <span><span class="dot" style="background:var(--velvet-dim); border:1px solid var(--velvet);"></span>Booked</span>
-      <span><span class="dot" style="background:var(--surface-2); border:1px solid var(--gold-dim);"></span>Premium ₹${show.price.premium}</span>
-      <span><span class="dot" style="background:var(--surface-2); border:1px solid var(--border);"></span>Gold ₹${show.price.gold} · Silver ₹${show.price.silver}</span>
-    </div>
-  `;
+    page.innerHTML = `
+      <p class="eyebrow"><a href="movie-details.html?id=${movie.id}" style="color:var(--gold)">← ${escapeHtml(movie.title)}</a></p>
+      <h1 class="h-display" style="font-size:1.8rem; margin:8px 0 2px;">${escapeHtml(movie.title)}</h1>
+      <p class="muted" style="margin-bottom:24px;">${escapeHtml(show.cinema)} · ${fmtDate(show.date)} · ${show.time}</p>
 
-  const mapEl = qs('#seatMap');
-  const bar = document.createElement('div');
-  bar.className = 'booking-bar';
-  bar.innerHTML = `
-    <div><span id="seatCount" class="mono">0 seats</span> <span class="muted" id="seatList"></span></div>
-    <div style="display:flex; align-items:center; gap:16px;">
-      <span class="h-display" style="font-size:1.5rem;">₹<span id="totalPrice">0</span></span>
-      <button class="btn btn-gold" id="confirmBtn" disabled>Confirm Seats</button>
-    </div>`;
-  document.body.appendChild(bar);
+      <div class="screen-arc"><span>Screen</span></div>
+      <div class="seat-map" id="seatMap"></div>
+      <div class="seat-legend">
+        <span><span class="dot" style="background:var(--surface-2); border:1px solid var(--border);"></span>Available</span>
+        <span><span class="dot" style="background:var(--gold);"></span>Selected</span>
+        <span><span class="dot" style="background:var(--velvet-dim); border:1px solid var(--velvet);"></span>Booked</span>
+        <span><span class="dot" style="background:var(--surface-2); border:1px solid var(--gold-dim);"></span>Premium ₹${show.price.premium}</span>
+        <span><span class="dot" style="background:var(--surface-2); border:1px solid var(--border);"></span>Gold ₹${show.price.gold} · Silver ₹${show.price.silver}</span>
+      </div>
+    `;
 
-  const map = buildSeatMap(mapEl, show, {
-    maxSelect: 8,
-    onChange(selected){
-      qs('#seatCount').textContent = `${selected.length} seat${selected.length===1?'':'s'}`;
-      qs('#seatList').textContent = selected.join(', ');
-      qs('#totalPrice').textContent = map.totalPrice();
-      qs('#confirmBtn').disabled = selected.length === 0;
-    }
-  });
+    const mapEl = qs('#seatMap');
+    const bar = document.createElement('div');
+    bar.className = 'booking-bar';
+    bar.innerHTML = `
+      <div><span id="seatCount" class="mono">0 seats</span> <span class="muted" id="seatList"></span></div>
+      <div style="display:flex; align-items:center; gap:16px;">
+        <span class="h-display" style="font-size:1.5rem;">₹<span id="totalPrice">0</span></span>
+        <button class="btn btn-gold" id="confirmBtn" disabled>Confirm Seats</button>
+      </div>`;
+    document.body.appendChild(bar);
 
-  qs('#confirmBtn').addEventListener('click', ()=>{
-    const selected = map.getSelected();
-    if(!selected.length) return;
-    sessionStorage.setItem('ch_pending_booking', JSON.stringify({
-      showId: show.id, seats: selected, total: map.totalPrice()
-    }));
-    location.href = 'checkout.html';
-  });
-}
+    const map = buildSeatMap(mapEl, show, seats, {
+      maxSelect: 8,
+      onChange(selected){
+        qs('#seatCount').textContent = `${selected.length} seat${selected.length===1?'':'s'}`;
+        qs('#seatList').textContent = selected.map(s=>s.label).join(', ');
+        qs('#totalPrice').textContent = map.totalPrice();
+        qs('#confirmBtn').disabled = selected.length === 0;
+      }
+    });
 
-}
+    qs('#confirmBtn').addEventListener('click', ()=>{
+      const selected = map.getSelected();
+      if(!selected.length) return;
+      /* seatIds are the integers the booking endpoint wants; labels
+         are carried only to show the user. The total here is an
+         estimate — POST /api/bookings prices the booking itself. */
+      sessionStorage.setItem('ch_pending_booking', JSON.stringify({
+        showId: show.id,
+        seatIds: selected.map(s=>s.id),
+        seats: selected.map(s=>s.label),
+        total: map.totalPrice()
+      }));
+      location.href = 'checkout.html';
+    });
+  } catch(err) {
+    renderError(qs('#page'), err);
+  }
+})();
 </script>
 </body>
 </html>

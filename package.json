@@ -1,0 +1,38 @@
+{
+  "name": "cinehall",
+  "version": "1.0.0",
+  "description": "CineHall - Online Movie Ticket Booking System",
+  "main": "admin-shell.js",
+  "scripts": {
+    "db:schema": "set -a; . ./.env; set +a; psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f database/schema.sql",
+    "db:seed": "set -a; . ./.env; set +a; psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f database/seed.sql",
+    "db:verify": "set -a; . ./.env; set +a; psql \"$DATABASE_URL\" -f database/verify.sql",
+    "db:reset": "./database/reset.sh",
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
+    "api:test": "node server/smoke.js",
+    "web:test": "node view-model-check.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TulasiLasya/movie-ticket-booking-system-ui.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/TulasiLasya/movie-ticket-booking-system-ui/issues"
+  },
+  "homepage": "https://github.com/TulasiLasya/movie-ticket-booking-system-ui#readme",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

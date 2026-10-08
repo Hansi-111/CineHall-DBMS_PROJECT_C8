@@ -6,6 +6,7 @@
 <title>Movie Details — CineHall</title>
 <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
 <nav class="topnav">
@@ -22,45 +23,57 @@
 
 <div class="container" id="page" style="padding:36px 28px 60px;"></div>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-initNavToggle();
-const session = DB.getSession();
-if(session){
-  qs('#authLink').textContent = '👤 ' + session.name;
-  qs('#authLink').href = 'profile.html';
-}
+(async () => {
+  initNavToggle();
+  const session = api.user();
+  if(session){
+    qs('#authLink').textContent = '👤 ' + session.name;
+    qs('#authLink').href = 'profile.html';
+  }
 
-const movie = DB.getMovie(getParam('id'));
-const page = qs('#page');
+  const page = qs('#page');
+  renderLoading(page, 'Loading film…');
 
-if(!movie){
-  page.innerHTML = `<div class="empty-state"><div class="h-display">Film not found</div><p>It may have finished its run. <a href="index.html" style="color:var(--gold)">Back to movies</a></p></div>`;
-} else {
-  const shows = DB.showsForMovie(movie.id);
-  const dates = [...new Set(shows.map(s=>s.date))];
-  const cinemas = [...new Set(shows.map(s=>s.cinema))];
+  let movie, shows;
+  try {
+    /* A 404 here throws — api.movie never resolves to undefined — so
+       the not-found state below is reached only for a real empty row. */
+    movie = await api.movie(getParam('id'));
+    if(movie) shows = await api.showtimesForMovie(movie.id);
+  } catch(err) {
+    renderError(page, err);
+    return;
+  }
 
-  page.innerHTML = `
-    <p class="eyebrow"><a href="index.html" style="color:var(--gold)">← All movies</a></p>
-    <div style="display:grid; grid-template-columns:220px 1fr; gap:32px; margin-top:18px;" id="detailsGrid">
-      <div class="poster-art" style="height:330px; border-radius:14px; font-size:3rem;">
-        ${movie.title.split(' ').map(w=>w[0]).join('').slice(0,3)}
-        <span class="rating">★ ${movie.score}</span>
-      </div>
-      <div>
-        <h1 class="h-display" style="font-size:clamp(2rem,5vw,3rem);">${movie.title}</h1>
-        <div class="poster-meta" style="margin:10px 0 16px; gap:12px;">
-          <span class="pill">${movie.rating}</span>
-          <span>${movie.genre}</span>
-          <span>${movie.lang}</span>
-          <span>${movie.duration} min</span>
+  if(!movie){
+    page.innerHTML = `<div class="empty-state"><div class="h-display">Film not found</div><p>It may have finished its run. <a href="index.html" style="color:var(--gold)">Back to movies</a></p></div>`;
+  } else {
+    const dates = [...new Set(shows.map(s=>s.date))];
+    const cinemas = [...new Set(shows.map(s=>s.cinema))];
+
+    page.innerHTML = `
+      <p class="eyebrow"><a href="index.html" style="color:var(--gold)">← All movies</a></p>
+      <div style="display:grid; grid-template-columns:220px 1fr; gap:32px; margin-top:18px;" id="detailsGrid">
+        <div class="poster-art" style="height:330px; border-radius:14px; font-size:3rem;">
+          ${movie.title.split(' ').map(w=>w[0]).join('').slice(0,3)}
+          <span class="rating">★ ${movie.score}</span>
         </div>
-        <p class="muted" style="max-width:560px;">${movie.synopsis}</p>
+        <div>
+          <h1 class="h-display" style="font-size:clamp(2rem,5vw,3rem);">${movie.title}</h1>
+          <div class="poster-meta" style="margin:10px 0 16px; gap:12px;">
+            <span class="pill">${movie.rating}</span>
+            <span>${movie.genre}</span>
+            <span>${movie.lang}</span>
+            <span>${movie.duration} min</span>
+          </div>
+          <p class="muted" style="max-width:560px;">${movie.synopsis}</p>
+        </div>
       </div>
-    </div>
 
-    ${movie.status==='upcoming'
+      ${movie.status==='upcoming'
       ? `<div class="card" style="margin-top:32px; text-align:center;"><p class="h-display" style="font-size:1.3rem; color:var(--gold);">Booking opens soon</p><p class="muted">This one hasn't hit the screen yet — check back closer to release.</p></div>`
       : `
       <div style="margin-top:36px;">
@@ -97,8 +110,8 @@ if(!movie){
       });
     });
   }
-}
-
+  }
+})();
 </script>
 
 <style>

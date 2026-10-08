@@ -6,6 +6,7 @@
 <title>My Profile — CineHall</title>
 <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
 <nav class="topnav">
@@ -34,7 +35,7 @@
                   margin:0 auto 14px;">
       </div>
 
-      <h1 class="h-display" id="profileName" style="font-size:2rem;">User</h1>
+      <h1 class="h-display" id="profileName">User</h1>
 
       <p class="muted" id="profileEmail">email@example.com</p>
 
@@ -64,34 +65,38 @@
     </div>
 
   </div>
+
 </div>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-const session = DB.getSession();
+(async () => {
+  const session = api.user();
 
-if(!session || session.role !== 'customer'){
-  location.href = 'login.html';
-}
+  if(!session || session.role !== 'customer'){
+    location.href = 'login.html';
+    return;
+  }
 
-qs('#profileName').textContent = session.name;
-qs('#profileEmail').textContent = session.email;
+  qs('#profileName').textContent = session.name;
+  qs('#profileEmail').textContent = session.email;
 
-const initials = session.name
-  .split(' ')
-  .map(w => w[0])
-  .join('')
-  .slice(0,2)
-  .toUpperCase();
+  const initials = session.name
+    .split(' ')
+    .map(w => w[0])
+    .join('')
+    .slice(0,2)
+    .toUpperCase();
 
-qs('#avatar').textContent = initials;
+  qs('#avatar').textContent = initials;
 
-qs('#logoutBtn').addEventListener('click', ()=>{
-  DB.clearSession();
-  toast('Signed out');
-  location.href = 'index.html';
-});
+  qs('#logoutBtn').addEventListener('click', ()=>{
+    api.clearSession();
+    toast('Signed out');
+    location.href = 'index.html';
+  });
+})();
 </script>
-
 </body>
 </html>

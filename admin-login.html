@@ -6,6 +6,7 @@
 <title>Admin Sign In — CineHall</title>
 <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
 <div class="auth-shell">
@@ -16,23 +17,36 @@
     </div>
     <div class="card">
       <form id="adminLoginForm">
-        <div class="field"><label for="a-user">Admin username</label><input id="a-user" required placeholder="admin"></div>
-        <div class="field"><label for="a-pass">Password</label><input id="a-pass" type="password" required placeholder="Any password (demo)"></div>
+        <div class="field"><label for="a-user">Admin username</label><input id="a-user" required></div>
+        <div class="field"><label for="a-pass">Password</label><input id="a-pass" type="password" required></div>
         <button class="btn btn-gold btn-block" type="submit">Enter Dashboard</button>
       </form>
     </div>
     <p class="muted" style="text-align:center; margin-top:16px; font-size:.82rem;">
-      Demo login — any username/password lets you into the admin console.
+      Contact the site administrator for login credentials.
     </p>
   </div>
 </div>
 
+<script src="api.js"></script>
 <script src="script.js"></script>
 <script>
-qs('#adminLoginForm').addEventListener('submit', e=>{
+qs('#adminLoginForm').addEventListener('submit', async e=>{
   e.preventDefault();
-  DB.setSession({ name: qs('#a-user').value || 'Admin', role:'admin' });
-  location.href = 'admin-dashboard.html';
+  try {
+    const u = await api.login(qs('#a-user').value, qs('#a-pass').value);
+    if(!api.isStaff()){
+      /* Right password, wrong kind of account: a customer signed in
+         on the staff form would otherwise land on a dashboard that
+         immediately bounces them back here. */
+      api.clearSession();
+      toast('That account is not an admin');
+      return;
+    }
+    location.href = 'admin-dashboard.html';
+  } catch(err) {
+    toast(isApiError(err) && err.errors.length ? err.errors[0].message : 'Invalid credentials');
+  }
 });
 </script>
 </body>
