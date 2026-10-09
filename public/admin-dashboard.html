@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard — CineHall</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<script src="script.js"></script>
+<script src="admin-shell.js"></script>
+<script>
+const ui = renderAdminShell('dashboard');
+if(ui){
+  ui.setTitle('Dashboard');
+  (async ()=>{
+    try{
+      const [movies, shows, allBookings] = await Promise.all([DB.getMovies(), DB.getShows(), DB.getBookings()]);
+      const confirmed = allBookings.filter(b=>b.status==='confirmed');      // cancelled tickets don't count as revenue
+      const revenue = confirmed.reduce((s,b)=>s+b.total, 0);
+      const seatsSold = confirmed.reduce((s,b)=>s+b.seats.length, 0);
+
+      ui.content.innerHTML = `
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-num">${movies.length}</div><div class="stat-label">Movies listed</div></div>
+          <div class="stat-card"><div class="stat-num">${shows.length}</div><div class="stat-label">Showtimes</div></div>
+          <div class="stat-card"><div class="stat-num">${confirmed.length}</div><div class="stat-label">Tickets booked</div></div>
+          <div class="stat-card"><div class="stat-num">₹${revenue}</div><div class="stat-label">Revenue (${seatsSold} seats)</div></div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Ticket</th><th>Movie</th><th>Show</th><th>Seats</th><th>Amount</th><th>Status</th></tr></thead>
+            <tbody>
+              ${allBookings.slice(0,8).map(b=>`<tr>
+                <td class="mono">${esc(b.code)}</td>
+                <td>${esc(b.movieTitle)}</td>
+                <td>${fmtDate(b.date)} · ${b.time}</td>
+                <td class="mono">${b.seats.join(', ')}</td>
+                <td>₹${b.total}</td>
+                <td><span class="status-badge ${b.status==='cancelled'?'status-cancelled':'status-confirmed'}">${b.status}</span></td>
+              </tr>`).join('') || `<tr><td colspan="6" class="muted" style="text-align:center; padding:30px;">No bookings yet</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }catch(e){ toast(e.message); }
+  })();
+}
+</script>
+</body>
+</html>

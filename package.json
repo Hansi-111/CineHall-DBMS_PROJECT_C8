@@ -1,0 +1,13 @@
+{
+  "name": "cinehall",
+  "version": "1.0.0",
+  "description": "CineHall movie ticket booking - DBMS project",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  }
+}

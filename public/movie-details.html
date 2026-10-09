@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Movie Details — CineHall</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <a href="index.html" class="brand"><span class="brand-mark"></span>CineHall</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Movies</a></li>
+      <li><a href="my-bookings.html">My Bookings</a></li>
+      <li><a href="login.html" id="authLink">Sign In</a></li>
+    </ul>
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<div class="container" id="page" style="padding:36px 28px 60px;"></div>
+
+<script src="script.js"></script>
+<script>
+initNavToggle();
+const session = DB.getSession();
+if(session){
+  qs('#authLink').textContent = '👤 ' + session.name;
+  qs('#authLink').href = 'profile.html';
+}
+
+async function loadPage(){
+let movie, shows = [];
+try{ movie = await DB.getMovie(getParam('id')); if(movie && movie.status!=='upcoming') shows = await DB.showsForMovie(movie.id); }
+catch(e){ toast(e.message); }
+const page = qs('#page');
+
+if(!movie){
+  page.innerHTML = `<div class="empty-state"><div class="h-display">Film not found</div><p>It may have finished its run. <a href="index.html" style="color:var(--gold)">Back to movies</a></p></div>`;
+} else {
+  const dates = [...new Set(shows.map(s=>s.date))];
+  const cinemas = [...new Set(shows.map(s=>s.cinema))];
+
+  page.innerHTML = `
+    <p class="eyebrow"><a href="index.html" style="color:var(--gold)">← All movies</a></p>
+    <div style="display:grid; grid-template-columns:220px 1fr; gap:32px; margin-top:18px;" id="detailsGrid">
+      <div class="poster-art" style="height:330px; border-radius:14px; font-size:3rem;">
+        ${esc(movie.title.split(' ').map(w=>w[0]).join('').slice(0,3))}
+        <span class="rating">★ ${movie.score}</span>
+      </div>
+      <div>
+        <h1 class="h-display" style="font-size:clamp(2rem,5vw,3rem);">${esc(movie.title)}</h1>
+        <div class="poster-meta" style="margin:10px 0 16px; gap:12px;">
+          <span class="pill">${movie.rating}</span>
+          <span>${esc(movie.genre)}</span>
+          <span>${esc(movie.lang)}</span>
+          <span>${movie.duration} min</span>
+        </div>
+        <p class="muted" style="max-width:560px;">${esc(movie.synopsis)}</p>
+      </div>
+    </div>
+
+    ${movie.status==='upcoming'
+      ? `<div class="card" style="margin-top:32px; text-align:center;"><p class="h-display" style="font-size:1.3rem; color:var(--gold);">Booking opens soon</p><p class="muted">This one hasn't hit the screen yet — check back closer to release.</p></div>`
+      : `
+      <div style="margin-top:36px;">
+        <p class="eyebrow" style="margin-bottom:10px;">Choose date</p>
+        <div class="chip-group" id="dateChips">
+          ${dates.map((d,i)=>`<button class="chip ${i===0?'selected':''}" data-date="${d}">${fmtDate(d)}</button>`).join('')}
+        </div>
+      </div>
+      <div id="cinemaSections" style="margin-top:28px;"></div>
+    `}
+  `;
+
+  if(movie.status!=='upcoming'){
+    function renderCinemas(date){
+      const wrap = qs('#cinemaSections');
+      wrap.innerHTML = cinemas.map(cin=>{
+        const cShows = shows.filter(s=>s.date===date && s.cinema===cin);
+        if(!cShows.length) return '';
+        return `
+        <div class="card" style="margin-bottom:16px;">
+          <p style="font-weight:700; margin-bottom:12px;">${esc(cin)}</p>
+          <div class="chip-group">
+            ${cShows.map(s=>`<a href="seats.html?showId=${s.id}" class="chip">${s.time} <span class="muted">· ₹${s.price.silver}+</span></a>`).join('')}
+          </div>
+        </div>`;
+      }).join('') || `<p class="muted">No shows on this date.</p>`;
+    }
+    renderCinemas(dates[0]);
+    qsa('#dateChips .chip').forEach(chip=>{
+      chip.addEventListener('click', ()=>{
+        qsa('#dateChips .chip').forEach(c=>c.classList.remove('selected'));
+        chip.classList.add('selected');
+        renderCinemas(chip.dataset.date);
+      });
+    });
+  }
+}
+}
+loadPage();
+
+</script>
+
+<style>
+  @media (max-width:640px){
+    #detailsGrid{ grid-template-columns:1fr !important; }
+  }
+</style>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkout — CineHall</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <a href="index.html" class="brand"><span class="brand-mark"></span>CineHall</a>
+    <ul class="nav-links"><li><a href="index.html">Movies</a></li></ul>
+  </div>
+</nav>
+
+<div class="container" style="max-width:520px; padding:40px 28px 60px;" id="page"></div>
+
+<script src="script.js"></script>
+<script>
+async function init(){
+  if(!requireAuth()) return;
+  const pending = JSON.parse(sessionStorage.getItem('ch_pending_booking')||'null');
+  const page = qs('#page');
+
+  const empty = `<div class="empty-state"><div class="h-display">Nothing to check out</div><a href="index.html" style="color:var(--gold)">Browse movies</a></div>`;
+  if(!pending){ page.innerHTML = empty; return; }
+
+  const show = await DB.getShow(pending.showId);
+  if(!show){ page.innerHTML = empty; return; }
+  const movie = await DB.getMovie(show.movieId);
+  const session = DB.getSession();
+
+  page.innerHTML = `
+    <p class="eyebrow" style="margin-bottom:14px;">Checkout</p>
+    <div class="card" style="margin-bottom:20px;">
+      <p style="font-weight:700;">${esc(movie.title)}</p>
+      <p class="muted" style="font-size:.86rem; margin-top:4px;">${esc(show.cinema)} · ${fmtDate(show.date)} · ${show.time}</p>
+      <p class="mono" style="margin-top:10px; color:var(--gold);">${pending.seats.join(', ')}</p>
+      <p style="margin-top:10px; display:flex; justify-content:space-between; border-top:1px solid var(--border-soft); padding-top:10px;">
+        <span class="muted">Total</span><span class="h-display" style="font-size:1.3rem;">₹${pending.total}</span>
+      </p>
+    </div>
+
+    <form id="checkoutForm">
+      <div class="field"><label>Booking for</label>
+        <input value="${esc(session.name)} · ${esc(session.email)}" disabled>
+      </div>
+      <div class="field">
+        <label for="method">Payment method</label>
+        <select id="method">
+          <option>UPI</option><option>Credit Card</option><option>Debit Card</option>
+        </select>
+      </div>
+      <button class="btn btn-gold btn-block" type="submit" id="payBtn">Pay ₹${pending.total} & Confirm</button>
+    </form>
+    <p class="muted" style="font-size:.78rem; margin-top:12px; text-align:center;">Demo payment — no real money is charged. The final amount is calculated by the server.</p>
+  `;
+
+  qs('#checkoutForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const btn = qs('#payBtn'); btn.disabled = true;
+    try{
+      const booking = await DB.addBooking({
+        showId: show.id, seatIds: pending.seatIds, paymentMethod: qs('#method').value
+      });
+      sessionStorage.removeItem('ch_pending_booking');
+      sessionStorage.setItem('ch_last_booking', JSON.stringify(booking));
+      location.href = 'confirmation.html';
+    }catch(err){
+      toast(err.message);
+      btn.disabled = false;
+      if(/taken/i.test(err.message)) setTimeout(()=>location.href = 'seats.html?showId='+show.id, 1800);
+    }
+  });
+}
+init().catch(e=>toast(e.message));
+</script>
+</body>
+</html>

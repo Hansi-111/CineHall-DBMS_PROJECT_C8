@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manage Showtimes — CineHall Admin</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<script src="script.js"></script>
+<script src="admin-shell.js"></script>
+<script>
+const ui = renderAdminShell('shows');
+if(ui){
+  ui.setTitle('Showtimes');
+  ui.topbarRight.innerHTML = `<button class="btn btn-gold btn-sm" id="addShowBtn">+ Add Showtime</button>`;
+
+  let shows = [], movies = [];
+
+  function renderTable(){
+    const titleOf = id => (movies.find(m=>m.id===id)||{}).title;
+    ui.content.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Movie</th><th>Cinema</th><th>Date</th><th>Time</th><th>Prices (S/G/P)</th><th>Booked</th><th></th></tr></thead>
+          <tbody>
+            ${shows.map(s=>`<tr>
+                <td style="font-weight:700;">${esc(titleOf(s.movieId) || '—')}</td>
+                <td>${esc(s.cinema)} · Screen ${s.screenNumber}</td>
+                <td>${fmtDate(s.date)}</td>
+                <td class="mono">${s.time}</td>
+                <td class="mono">₹${s.price.silver}/₹${s.price.gold}/₹${s.price.premium}</td>
+                <td>${s.bookedCount} seats</td>
+                <td><button class="icon-btn" data-del="${s.id}" title="Delete">✕</button></td>
+              </tr>`).join('') || `<tr><td colspan="7" class="muted" style="text-align:center; padding:30px;">No showtimes scheduled.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `;
+    qsa('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
+      if(!confirm('Remove this showtime? Any bookings for it will be deleted too.')) return;
+      try{ await DB.deleteShow(b.dataset.del); toast('Showtime removed'); await load(); }
+      catch(e){ toast(e.message); }
+    }));
+  }
+
+  async function load(){
+    try{ [shows, movies] = await Promise.all([DB.getShows(), DB.getMovies()]); renderTable(); }
+    catch(e){ toast(e.message); }
+  }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <div class="modal-head"><h3>Add Showtime</h3><button class="icon-btn" id="closeModal">✕</button></div>
+      <form id="showForm">
+        <div class="field"><label for="f-movie">Movie</label><select id="f-movie"></select></div>
+        <div class="field"><label for="f-screen">Cinema / Screen</label><select id="f-screen"></select></div>
+        <div class="field"><label for="f-date">Date</label><input id="f-date" type="date" required></div>
+        <div class="field"><label for="f-time">Time</label><input id="f-time" type="time" required></div>
+        <div class="field"><label for="f-silver">Silver price</label><input id="f-silver" type="number" min="1" value="150" required></div>
+        <div class="field"><label for="f-gold">Gold price</label><input id="f-gold" type="number" min="1" value="220" required></div>
+        <div class="field"><label for="f-premium">Premium price</label><input id="f-premium" type="number" min="1" value="320" required></div>
+        <button class="btn btn-gold btn-block" type="submit">Save Showtime</button>
+      </form>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  qs('#addShowBtn').addEventListener('click', async ()=>{
+    try{
+      const [mv, screens] = await Promise.all([DB.getMovies(), DB.getScreens()]);
+      qs('#f-movie').innerHTML = mv.map(m=>`<option value="${m.id}">${esc(m.title)}</option>`).join('');
+      qs('#f-screen').innerHTML = screens.map(s=>`<option value="${s.id}">${esc(s.cinema)} — Screen ${s.screenNumber}</option>`).join('');
+      backdrop.classList.add('open');
+    }catch(e){ toast(e.message); }
+  });
+  qs('#closeModal').addEventListener('click', ()=>backdrop.classList.remove('open'));
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.classList.remove('open'); });
+
+  qs('#showForm').addEventListener('submit', async e=>{
+    e.preventDefault();
+    try{
+      await DB.addShow({
+        movieId: Number(qs('#f-movie').value),
+        screenId: Number(qs('#f-screen').value),
+        date: qs('#f-date').value,
+        time: qs('#f-time').value,
+        price: { silver:Number(qs('#f-silver').value), gold:Number(qs('#f-gold').value), premium:Number(qs('#f-premium').value) }
+      });
+      backdrop.classList.remove('open');
+      toast('Showtime added');
+      await load();
+    }catch(err){ toast(err.message); }
+  });
+
+  load();
+}
+</script>
+</body>
+</html>

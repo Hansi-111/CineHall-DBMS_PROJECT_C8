@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Sign In — CineHall</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="auth-shell">
+  <div class="auth-card">
+    <div style="text-align:center; margin-bottom:26px;">
+      <a href="index.html" class="brand" style="justify-content:center; display:flex;"><span class="brand-mark"></span>CineHall</a>
+      <p class="eyebrow" style="justify-content:center; margin-top:8px;">Admin console</p>
+    </div>
+    <div class="card">
+      <form id="adminLoginForm">
+        <div class="field"><label for="a-user">Admin username</label><input id="a-user" required placeholder="admin"></div>
+        <div class="field"><label for="a-pass">Password</label><input id="a-pass" type="password" required></div>
+        <button class="btn btn-gold btn-block" type="submit">Enter Dashboard</button>
+      </form>
+    </div>
+    <p class="muted" style="text-align:center; margin-top:16px; font-size:.82rem;">
+      Credentials are set in server.js (ADMIN_USER / ADMIN_PASS).
+    </p>
+  </div>
+</div>
+
+<script src="script.js"></script>
+<script>
+qs('#adminLoginForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  try{
+    await DB.adminLogin(qs('#a-user').value.trim(), qs('#a-pass').value);
+    location.href = 'admin-dashboard.html';
+  }catch(err){ toast(err.message); }
+});
+</script>
+</body>
+</html>

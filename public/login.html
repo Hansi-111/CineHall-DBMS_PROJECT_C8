@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign In — CineHall</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="auth-shell">
+  <div class="auth-card">
+    <div style="text-align:center; margin-bottom:26px;">
+      <a href="index.html" class="brand" style="justify-content:center; display:flex;"><span class="brand-mark"></span>CineHall</a>
+    </div>
+    <div class="card">
+      <div class="tab-switch">
+        <button id="tabLogin" class="active">Sign In</button>
+        <button id="tabSignup">Create Account</button>
+      </div>
+
+      <form id="loginForm">
+        <div class="field"><label for="li-email">Email</label><input id="li-email" type="email" required></div>
+        <div class="field"><label for="li-pass">Password</label><input id="li-pass" type="password" required></div>
+        <button class="btn btn-gold btn-block" type="submit">Sign In</button>
+      </form>
+
+      <form id="signupForm" style="display:none;">
+        <div class="field"><label for="su-name">Full name</label><input id="su-name" required></div>
+        <div class="field"><label for="su-email">Email</label><input id="su-email" type="email" required></div>
+        <div class="field"><label for="su-phone">Phone</label><input id="su-phone" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="10-digit mobile number" required></div>
+        <div class="field"><label for="su-pass">Password</label><input id="su-pass" type="password" minlength="6" required></div>
+        <button class="btn btn-gold btn-block" type="submit">Create Account</button>
+      </form>
+    </div>
+    <p class="muted" style="text-align:center; margin-top:16px; font-size:.82rem;">
+      You'll need an account to book tickets — it only takes a few seconds.
+    </p>
+  </div>
+</div>
+
+<script src="script.js"></script>
+<script>
+const tabLogin = qs('#tabLogin'), tabSignup = qs('#tabSignup');
+const loginForm = qs('#loginForm'), signupForm = qs('#signupForm');
+
+tabLogin.addEventListener('click', ()=>{
+  tabLogin.classList.add('active'); tabSignup.classList.remove('active');
+  loginForm.style.display='block'; signupForm.style.display='none';
+});
+tabSignup.addEventListener('click', ()=>{
+  tabSignup.classList.add('active'); tabLogin.classList.remove('active');
+  signupForm.style.display='block'; loginForm.style.display='none';
+});
+
+function postLoginRedirect(){
+  const dest = sessionStorage.getItem('ch_redirect_after_login');
+  sessionStorage.removeItem('ch_redirect_after_login');
+  location.href = dest || 'profile.html';
+}
+
+loginForm.addEventListener('submit', async e=>{
+  e.preventDefault();
+  try{
+    await DB.login(qs('#li-email').value, qs('#li-pass').value);
+    toast('Signed in');
+    postLoginRedirect();
+  }catch(err){ toast(err.message); }
+});
+
+signupForm.addEventListener('submit', async e=>{
+  e.preventDefault();
+  try{
+    await DB.signup({
+      name: qs('#su-name').value, email: qs('#su-email').value,
+      phone: qs('#su-phone').value, password: qs('#su-pass').value
+    });
+    toast('Account created');
+    postLoginRedirect();
+  }catch(err){ toast(err.message); }
+});
+</script>
+</body>
+</html>

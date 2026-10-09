@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CineHall — Book Movie Tickets</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <a href="index.html" class="brand"><span class="brand-mark"></span>CineHall</a>
+
+    <ul class="nav-links" id="navLinks">
+      <li><a href="index.html" class="active">Movies</a></li>
+      <li><a href="#" id="myBookingsLink">My Bookings</a></li>
+      <li id="authArea"></li>
+      <li><a href="admin-login.html" class="muted" style="font-size:.8rem;">Admin →</a></li>
+    </ul>
+
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<header class="container" style="padding:48px 28px 12px;">
+  <p class="eyebrow">Now booking</p>
+  <h1 class="h-display" style="font-size:clamp(2.2rem,6vw,3.6rem); margin-top:8px; max-width:640px;">
+    The lights are down. Take your seat.
+  </h1>
+  <p class="muted" style="max-width:520px; margin-top:10px;">
+    Pick a film, choose your showtime, and lock in seats in under a minute.
+  </p>
+</header>
+
+<section class="container" style="margin-top:28px;">
+  <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px;">
+    <h2 class="h-display" style="font-size:1.5rem;">Now Showing</h2>
+    <span class="muted" style="font-size:.82rem;">Scroll for more →</span>
+  </div>
+  <div class="poster-row" id="nowShowingRow"></div>
+</section>
+
+<section class="container" style="margin-top:20px;">
+  <h2 class="h-display" style="font-size:1.5rem; margin-bottom:14px;">Coming Soon</h2>
+  <div class="poster-grid" id="upcomingGrid"></div>
+</section>
+
+<footer>
+  <div class="container">CineHall · DBMS demo project · dark hall, bright screen</div>
+</footer>
+
+<script src="script.js"></script>
+<script>
+initNavToggle();
+
+function updateNavbar(){
+  const session = DB.getSession();
+  const authArea = qs('#authArea');
+
+  if(session && session.role === 'customer'){
+    authArea.innerHTML = `
+      <a href="profile.html">👤 ${esc(session.name)}</a>
+      <a href="#" id="logoutBtn" style="margin-left:14px; color:var(--gold);">Logout</a>
+    `;
+
+    qs('#logoutBtn').addEventListener('click', (e)=>{
+      e.preventDefault();
+      DB.clearSession();
+      toast('Signed out');
+      location.reload();
+    });
+  } else {
+    authArea.innerHTML = `<a href="login.html">Sign In</a>`;
+  }
+}
+
+function posterArt(movie){
+  const hues = {
+    'Sci-Fi':'#e3b23c',
+    'Drama':'#a5294c',
+    'Action':'#c07a2e',
+    'Thriller':'#7a5aa5',
+    'Fantasy':'#4c8ea3',
+    'Historical':'#8a6b3a'
+  };
+  const c = hues[movie.genre] || '#e3b23c';
+  return `background:linear-gradient(160deg, ${c}33, transparent 60%), var(--surface-2);`;
+}
+
+function renderCard(m){
+  return `
+  <a href="movie-details.html?id=${m.id}" class="poster-card">
+    <div class="poster-art" style="${posterArt(m)}">
+      <span class="rating">★ ${m.score}</span>
+      ${esc(m.title.split(' ').map(w=>w[0]).join('').slice(0,3))}
+    </div>
+    <div class="poster-body">
+      <div class="poster-title">${esc(m.title)}</div>
+      <div class="poster-meta">
+        <span class="pill">${m.rating}</span>
+        <span>${esc(m.genre)}</span>
+        <span>${m.duration}m</span>
+      </div>
+    </div>
+  </a>`;
+}
+
+async function loadMovies(){
+  try{
+    const movies = await DB.getMovies();
+    qs('#nowShowingRow').innerHTML = movies.filter(m=>m.status==='now').map(renderCard).join('')
+      || '<p class="muted">No films showing right now.</p>';
+    qs('#upcomingGrid').innerHTML = movies.filter(m=>m.status==='upcoming').map(renderCard).join('')
+      || '<p class="muted">Nothing announced yet.</p>';
+  }catch(e){ toast(e.message); }
+}
+loadMovies();
+
+updateNavbar();
+
+qs('#myBookingsLink').addEventListener('click', (e)=>{
+  e.preventDefault();
+  const session = DB.getSession();
+
+  if(!session){
+    sessionStorage.setItem('ch_redirect_after_login', 'my-bookings.html');
+    toast('Sign in to view your bookings');
+    location.href = 'login.html';
+    return;
+  }
+
+  location.href = 'my-bookings.html';
+});
+</script>
+
+</body>
+</html>
