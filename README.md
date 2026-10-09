@@ -1,13 +1,11 @@
 
-
-
 # CineHall - Movie Ticket Booking
 
 A movie ticket booking web app built as a DBMS project. Customers can browse movies, pick showtimes, choose seats, pay (demo) and manage their bookings. Admins can manage movies, showtimes and bookings.
 
 **Tech stack:** HTML / CSS / JavaScript (frontend), Node.js + Express (backend), PostgreSQL (database)
 
-## link: https://hansi-111.github.io/CineHall-DBMS_PROJECT_C8/
+
 ## 👥 Team — Group C8
 | Roll No | Name |
 |---|---|
